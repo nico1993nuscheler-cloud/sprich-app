@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Sprich needs microphone access to record your voice for transcription. Audio is sent directly to your chosen provider and never saved to disk.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Sprich needs Accessibility access to listen for your global shortcut (Fn+Shift / Fn+Control) system-wide and to paste transcribed text into the focused app.</string>
+    <key>CFBundleName</key>
+    <string>Sprich</string>
+    <key>CFBundleDisplayName</key>
+    <string>Sprich</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.niconuscheler.sprich</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>Sprich</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+</dict>
+</plist>

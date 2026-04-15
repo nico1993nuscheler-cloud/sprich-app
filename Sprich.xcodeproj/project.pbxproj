@@ -1,0 +1,363 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000001 /* SprichApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000001; };
+		A10000002 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000002; };
+		A10000003 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000003; };
+		A10000004 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000004; };
+		A10000005 /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000005; };
+		A10000006 /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000006; };
+		A10000007 /* TextInserter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000007; };
+		A10000008 /* PipelineCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000008; };
+		A10000009 /* SprichError.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000009; };
+		A10000010 /* TranscriptionMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010; };
+		A10000011 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000011; };
+		A10000012 /* KeychainManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012; };
+		A10000013 /* InputSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000013; };
+		A10000014 /* Permissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000014; };
+		A10000015 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000015; };
+		A10000016 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000016; };
+		A10000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000017; };
+		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021; };
+		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022; };
+		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000001 /* SprichApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SprichApp.swift; sourceTree = "<group>"; };
+		B10000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B10000003 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		B10000004 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		B10000005 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
+		B10000006 /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		B10000007 /* TextInserter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInserter.swift; sourceTree = "<group>"; };
+		B10000008 /* PipelineCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineCoordinator.swift; sourceTree = "<group>"; };
+		B10000009 /* SprichError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SprichError.swift; sourceTree = "<group>"; };
+		B10000010 /* TranscriptionMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionMode.swift; sourceTree = "<group>"; };
+		B10000011 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
+		B10000012 /* KeychainManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainManager.swift; sourceTree = "<group>"; };
+		B10000013 /* InputSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitizer.swift; sourceTree = "<group>"; };
+		B10000014 /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
+		B10000015 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B10000016 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		B10000017 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000018 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000019 /* Sprich.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Sprich.entitlements; sourceTree = "<group>"; };
+		B10000020 /* Sprich.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sprich.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000021 /* RecordingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingOverlay.swift; sourceTree = "<group>"; };
+		B10000022 /* TextPostProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPostProcessor.swift; sourceTree = "<group>"; };
+		B10000023 /* ShortcutHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHelpView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D10000001 = {
+			isa = PBXGroup;
+			children = (
+				D10000002 /* Sprich */,
+				D10000008 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D10000002 /* Sprich */ = {
+			isa = PBXGroup;
+			children = (
+				B10000001 /* SprichApp.swift */,
+				B10000018 /* Info.plist */,
+				B10000019 /* Sprich.entitlements */,
+				B10000017 /* Assets.xcassets */,
+				D10000003 /* Core */,
+				D10000004 /* Models */,
+				D10000005 /* Security */,
+				D10000006 /* Views */,
+			);
+			path = Sprich;
+			sourceTree = "<group>";
+		};
+		D10000003 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				B10000002 /* AppState.swift */,
+				B10000003 /* AudioRecorder.swift */,
+				B10000004 /* HotkeyManager.swift */,
+				B10000005 /* TranscriptionService.swift */,
+				B10000006 /* LLMService.swift */,
+				B10000007 /* TextInserter.swift */,
+				B10000008 /* PipelineCoordinator.swift */,
+				B10000009 /* SprichError.swift */,
+				B10000022 /* TextPostProcessor.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		D10000004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010 /* TranscriptionMode.swift */,
+				B10000011 /* Settings.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		D10000005 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				B10000012 /* KeychainManager.swift */,
+				B10000013 /* InputSanitizer.swift */,
+				B10000014 /* Permissions.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		D10000006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B10000015 /* SettingsView.swift */,
+				B10000016 /* OnboardingView.swift */,
+				B10000023 /* ShortcutHelpView.swift */,
+				B10000021 /* RecordingOverlay.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		D10000008 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000020 /* Sprich.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10000001 /* Sprich */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000003;
+			buildPhases = (
+				E10000002 /* Sources */,
+				C10000001 /* Frameworks */,
+				E10000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Sprich;
+			productName = Sprich;
+			productReference = B10000020 /* Sprich.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E10000004 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					E10000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = F10000001;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D10000001;
+			productRefGroup = D10000008 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10000001 /* Sprich */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		E10000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000017 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E10000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000001 /* SprichApp.swift in Sources */,
+				A10000002 /* AppState.swift in Sources */,
+				A10000003 /* AudioRecorder.swift in Sources */,
+				A10000004 /* HotkeyManager.swift in Sources */,
+				A10000005 /* TranscriptionService.swift in Sources */,
+				A10000006 /* LLMService.swift in Sources */,
+				A10000007 /* TextInserter.swift in Sources */,
+				A10000008 /* PipelineCoordinator.swift in Sources */,
+				A10000009 /* SprichError.swift in Sources */,
+				A10000010 /* TranscriptionMode.swift in Sources */,
+				A10000011 /* Settings.swift in Sources */,
+				A10000012 /* KeychainManager.swift in Sources */,
+				A10000013 /* InputSanitizer.swift in Sources */,
+				A10000014 /* Permissions.swift in Sources */,
+				A10000015 /* SettingsView.swift in Sources */,
+				A10000016 /* OnboardingView.swift in Sources */,
+				A10000018 /* RecordingOverlay.swift in Sources */,
+				A10000019 /* TextPostProcessor.swift in Sources */,
+				A10000020 /* ShortcutHelpView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F10000002 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F10000005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F10000004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sprich/Sprich.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sprich/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.niconuscheler.sprich;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F10000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sprich/Sprich.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sprich/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.niconuscheler.sprich;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10000001 /* Build configuration list for PBXProject "Sprich" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000002 /* Debug */,
+				F10000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000003 /* Build configuration list for PBXNativeTarget "Sprich" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F10000004 /* Debug */,
+				F10000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = E10000004 /* Project object */;
+}
