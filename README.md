@@ -111,10 +111,11 @@ Sprich never phones home. It doesn't check for updates. It doesn't send usage da
 - Never included in crash logs or debug output
 
 ### Audio never touches disk
-Your voice is captured into an in-memory buffer, sent directly to your chosen STT provider over TLS, then the buffer is released. There is no temp file, no cache, no local recording.
+Your voice is captured into an in-memory buffer, WAV-encoded in RAM, sent directly to your chosen STT provider over TLS, then the buffer is released. There is no temp file, no cache, no local recording — verifiable in [`AudioRecorder.swift`](Sprich/Core/AudioRecorder.swift).
 
 ### Transport security
-- TLS 1.2+ enforced on every API call (`URLSession` default)
+- TLS 1.2+ enforced on every API call (`URLSession` default + explicit `NSAppTransportSecurity` policy in Info.plist blocks all cleartext HTTP)
+- Ephemeral `URLSession` config — no on-disk URL cache, no cookie storage, no credential storage
 - No HTTP fallback anywhere
 - No third-party networking libraries — just Foundation
 
@@ -130,6 +131,11 @@ Sprich requests only:
 - Accessibility permission — for global shortcuts and simulated paste
 
 No network-client entitlement, no full-disk access, no camera, no contacts, no location.
+
+### About the App Sandbox
+Sprich runs **outside** the macOS App Sandbox. This is not optional: the App Sandbox is incompatible with the CGEvent tap needed for global hotkeys and with the simulated-paste mechanism that inserts text into the focused app. Every menu-bar dictation tool (including the paid ones) makes the same trade-off.
+
+What this means in practice: the "no disk access / no camera / no contacts" guarantees above are enforced by the **code**, not by the OS. The code is MIT-licensed and short enough to audit in an afternoon. If you want OS-level enforcement, don't run third-party menu-bar tools — but if you're going to run one, running one you can read beats running one you can't.
 
 ### Ad-hoc code signing
 Sprich is signed ad-hoc (not with a paid Apple Developer ID) precisely because there's no centralized publisher. The trust model is "read the source, build it yourself." This means a Gatekeeper warning on first launch — that's the cost of having no backdoor channel.

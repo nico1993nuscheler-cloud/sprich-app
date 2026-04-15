@@ -2,14 +2,24 @@ import Foundation
 import AVFoundation
 
 /// Records audio from the microphone using AVAudioEngine.
-/// Outputs M4A data suitable for Whisper API upload.
+/// Audio is accumulated entirely in RAM — never written to disk —
+/// and returned as a WAV-encoded `Data` blob suitable for STT API upload.
+///
+/// Why in-memory only: a temp file in `/tmp` can be read by any app on the
+/// system, snapshotted by Time Machine/iCloud mid-recording, or survive a
+/// crash. Keeping samples in RAM means they vanish the moment the process
+/// exits and never hit any backup/forensics surface.
 class AudioRecorder {
     private var audioEngine: AVAudioEngine?
-    private var audioFile: AVAudioFile?
-    private var tempFileURL: URL?
     private var isRecording = false
     private var recordingStartTime: Date?
     private let maxDuration: TimeInterval
+
+    // In-memory PCM sample storage. Stored as 16-bit little-endian mono
+    // samples at `sampleRate` Hz — the canonical WAV payload format.
+    private var pcmBuffer = Data()
+    private var sampleRate: Double = 16000
+    private let bufferQueue = DispatchQueue(label: "com.niconuscheler.sprich.audiobuffer")
 
     /// Called on each audio buffer with the current RMS level (0.0–1.0).
     var onAudioLevel: ((Float) -> Void)?
@@ -24,22 +34,11 @@ class AudioRecorder {
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
-
-        // Use the input node's native format to avoid conversion issues
         let nativeFormat = inputNode.outputFormat(forBus: 0)
+        self.sampleRate = nativeFormat.sampleRate
 
-        // Create temp file for recording
-        let tempDir = FileManager.default.temporaryDirectory
-        let fileName = "sprich_recording_\(UUID().uuidString).wav"
-        let fileURL = tempDir.appendingPathComponent(fileName)
-        self.tempFileURL = fileURL
-
-        // Create audio file with the native format
-        let audioFile = try AVAudioFile(
-            forWriting: fileURL,
-            settings: nativeFormat.settings
-        )
-        self.audioFile = audioFile
+        // Reset in-memory buffer for this recording.
+        bufferQueue.sync { pcmBuffer = Data() }
 
         // Install tap to capture audio
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
@@ -49,23 +48,22 @@ class AudioRecorder {
             if let start = self.recordingStartTime,
                Date().timeIntervalSince(start) > self.maxDuration {
                 DispatchQueue.main.async {
-                    try? self.stopRecording()
+                    _ = try? self.stopRecording()
                 }
                 return
             }
 
-            // Write buffer to file
-            try? audioFile.write(from: buffer)
-
-            // Compute RMS audio level for visualization
+            // Append samples to in-memory buffer (converted to 16-bit PCM).
             if let channelData = buffer.floatChannelData?[0] {
                 let frameCount = Int(buffer.frameLength)
+                self.appendPCM16(from: channelData, frameCount: frameCount)
+
+                // Compute RMS audio level for visualization
                 var sum: Float = 0
                 for i in 0..<frameCount {
                     sum += channelData[i] * channelData[i]
                 }
                 let rms = sqrtf(sum / Float(max(frameCount, 1)))
-                // Normalize: typical speech RMS is 0.01–0.15, map to 0–1
                 let normalized = min(1.0, rms * 8)
                 DispatchQueue.main.async {
                     self.onAudioLevel?(normalized)
@@ -79,36 +77,28 @@ class AudioRecorder {
         self.recordingStartTime = Date()
     }
 
-    /// Stop recording and return the audio data.
-    /// Audio data is suitable for direct upload to STT API.
+    /// Stop recording and return a WAV-encoded Data blob built in memory.
+    /// The returned bytes are byte-for-byte identical to a standard
+    /// 16-bit PCM mono WAV file, suitable for direct upload to STT APIs.
     func stopRecording() throws -> Data? {
         guard isRecording else { return nil }
 
         isRecording = false
         recordingStartTime = nil
 
-        // Remove tap and stop engine
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        audioFile = nil  // Close the file
 
-        // Read the recorded data
-        guard let fileURL = tempFileURL else { return nil }
-        defer {
-            // Clean up temp file — no audio persistence on disk
-            try? FileManager.default.removeItem(at: fileURL)
-            tempFileURL = nil
-        }
+        let pcm = bufferQueue.sync { pcmBuffer }
+        // Zero out our copy so the samples don't linger in the instance's heap.
+        bufferQueue.sync { pcmBuffer = Data() }
 
-        let data = try Data(contentsOf: fileURL)
+        // Return nil if recording was too short (< ~0.25s of mono 16kHz)
+        // 16kHz * 2 bytes * 0.25s = 8000 bytes
+        if pcm.count < 8000 { return nil }
 
-        // Return nil if recording was too short (< 0.5 seconds likely noise)
-        if data.count < 8000 {  // ~0.25 seconds at 16kHz
-            return nil
-        }
-
-        return data
+        return encodeWAV(pcm: pcm, sampleRate: Int(sampleRate), channels: 1, bitsPerSample: 16)
     }
 
     /// Cancel recording without returning data.
@@ -118,16 +108,73 @@ class AudioRecorder {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        audioFile = nil
-
-        // Clean up temp file
-        if let fileURL = tempFileURL {
-            try? FileManager.default.removeItem(at: fileURL)
-            tempFileURL = nil
-        }
+        bufferQueue.sync { pcmBuffer = Data() }
     }
 
     var recording: Bool {
         return isRecording
+    }
+
+    // MARK: - In-memory PCM accumulation
+
+    /// Convert float samples in [-1.0, 1.0] to 16-bit little-endian PCM
+    /// and append to the in-memory buffer.
+    private func appendPCM16(from samples: UnsafePointer<Float>, frameCount: Int) {
+        var chunk = Data(capacity: frameCount * 2)
+        for i in 0..<frameCount {
+            let clamped = max(-1.0, min(1.0, samples[i]))
+            let value = Int16(clamped * Float(Int16.max))
+            var le = value.littleEndian
+            withUnsafeBytes(of: &le) { chunk.append(contentsOf: $0) }
+        }
+        bufferQueue.sync { pcmBuffer.append(chunk) }
+    }
+
+    // MARK: - WAV encoding
+
+    /// Build a minimal RIFF/WAVE container around the raw PCM payload.
+    /// Produces the same bytes AVAudioFile would write for an equivalent
+    /// PCM file — just without ever touching disk.
+    private func encodeWAV(pcm: Data, sampleRate: Int, channels: Int, bitsPerSample: Int) -> Data {
+        let byteRate = sampleRate * channels * bitsPerSample / 8
+        let blockAlign = channels * bitsPerSample / 8
+        let dataSize = pcm.count
+        let chunkSize = 36 + dataSize
+
+        var header = Data(capacity: 44)
+
+        // RIFF header
+        header.append(contentsOf: "RIFF".utf8)
+        header.append(uint32LE(UInt32(chunkSize)))
+        header.append(contentsOf: "WAVE".utf8)
+
+        // fmt subchunk
+        header.append(contentsOf: "fmt ".utf8)
+        header.append(uint32LE(16))              // PCM fmt chunk size
+        header.append(uint16LE(1))               // AudioFormat = 1 (PCM)
+        header.append(uint16LE(UInt16(channels)))
+        header.append(uint32LE(UInt32(sampleRate)))
+        header.append(uint32LE(UInt32(byteRate)))
+        header.append(uint16LE(UInt16(blockAlign)))
+        header.append(uint16LE(UInt16(bitsPerSample)))
+
+        // data subchunk
+        header.append(contentsOf: "data".utf8)
+        header.append(uint32LE(UInt32(dataSize)))
+
+        var wav = Data(capacity: 44 + dataSize)
+        wav.append(header)
+        wav.append(pcm)
+        return wav
+    }
+
+    private func uint16LE(_ value: UInt16) -> Data {
+        var le = value.littleEndian
+        return Data(bytes: &le, count: 2)
+    }
+
+    private func uint32LE(_ value: UInt32) -> Data {
+        var le = value.littleEndian
+        return Data(bytes: &le, count: 4)
     }
 }
