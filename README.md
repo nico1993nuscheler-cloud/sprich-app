@@ -60,7 +60,7 @@ Sprich auto-detects German and English out of the box. Force a specific language
 
 ### Option A — Build from source (recommended)
 ```bash
-git clone https://github.com/niconuscheler/sprich-app.git
+git clone https://github.com/nico1993nuscheler-cloud/sprich-app.git
 cd sprich-app
 ./install.sh
 ```
@@ -69,7 +69,7 @@ This builds the app, copies it to `/Applications/`, and launches it. The onboard
 
 ### Option B — Pre-built DMG
 
-Download the latest `.dmg` from the [Releases page](https://github.com/niconuscheler/sprich-app/releases), drag `Sprich.app` to `/Applications/`, then open it.
+Download the latest `.dmg` from the [Releases page](https://github.com/nico1993nuscheler-cloud/sprich-app/releases), drag `Sprich.app` to `/Applications/`, then open it.
 
 > **First-launch note:** Because Sprich is ad-hoc signed (no paid Apple Developer account — this is a free open-source project), macOS Gatekeeper will warn you on first launch.
 >
