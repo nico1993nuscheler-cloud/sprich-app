@@ -5,7 +5,10 @@ struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
     @State private var currentStep = 0
     @State private var groqKey = ""
+    @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
+    @State private var microphoneGranted = Permissions.isMicrophoneGranted()
 
+    private let permissionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let totalSteps = 5
 
     var body: some View {
@@ -32,6 +35,10 @@ struct OnboardingView: View {
         }
         .frame(width: 500, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
+        .onReceive(permissionTimer) { _ in
+            accessibilityGranted = Permissions.isAccessibilityGranted()
+            microphoneGranted = Permissions.isMicrophoneGranted()
+        }
     }
 
     // MARK: - Shared pieces
@@ -144,7 +151,7 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
 
             HStack(spacing: 10) {
-                if Permissions.isAccessibilityGranted() {
+                if accessibilityGranted {
                     Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     Text("Granted").font(.system(size: 13, weight: .semibold))
                 } else {
@@ -153,7 +160,7 @@ struct OnboardingView: View {
                 }
             }
 
-            if !Permissions.isAccessibilityGranted() {
+            if !accessibilityGranted {
                 Button("Open Accessibility Settings") {
                     Permissions.promptAccessibility()
                 }
@@ -165,8 +172,16 @@ struct OnboardingView: View {
 
             Spacer()
 
-            navRow(primaryLabel: Permissions.isAccessibilityGranted() ? "Continue" : "I've granted access") {
+            navRow(primaryLabel: accessibilityGranted ? "Continue" : "I've granted access") {
                 currentStep = 2
+            }
+        }
+        .onChange(of: accessibilityGranted) { granted in
+            if granted && currentStep == 1 {
+                // Auto-advance after a short delay so the user sees the green checkmark
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if currentStep == 1 { currentStep = 2 }
+                }
             }
         }
     }
@@ -181,7 +196,7 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
 
             HStack(spacing: 10) {
-                if Permissions.isMicrophoneGranted() {
+                if microphoneGranted {
                     Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     Text("Granted").font(.system(size: 13, weight: .semibold))
                 } else {
@@ -190,9 +205,12 @@ struct OnboardingView: View {
                 }
             }
 
-            if !Permissions.isMicrophoneGranted() {
+            if !microphoneGranted {
                 Button("Grant Microphone Access") {
-                    Task { _ = await Permissions.requestMicrophone() }
+                    Task {
+                        _ = await Permissions.requestMicrophone()
+                        microphoneGranted = Permissions.isMicrophoneGranted()
+                    }
                 }
                 .buttonStyle(.bordered)
             }
@@ -200,6 +218,13 @@ struct OnboardingView: View {
             Spacer()
 
             navRow(primaryLabel: "Continue") { currentStep = 3 }
+        }
+        .onChange(of: microphoneGranted) { granted in
+            if granted && currentStep == 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if currentStep == 2 { currentStep = 3 }
+                }
+            }
         }
     }
 
