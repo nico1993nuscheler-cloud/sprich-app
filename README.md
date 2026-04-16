@@ -92,9 +92,9 @@ Additional providers (OpenAI, Deepgram, Claude, Gemini) can be added later in Se
 
 ## Cost
 
-At 50 dictations/day (30 seconds each) with **Groq + Gemini**:
+At 50 dictations/day (30 seconds each) with **Groq:
 - **~$0/month** vs. $20/month for Wispr Flow
-- Groq's free tier covers most daily use — often $0/month in practice
+- Groq's free tier covers individual daily use more than enough — $0/month in practice
 
 ## Security & Privacy
 
