@@ -5,6 +5,8 @@ import Security
 /// Keys are never stored in UserDefaults or plaintext on disk.
 enum KeychainManager {
 
+    private static let service = "com.niconuscheler.sprich"
+
     /// Store a value securely in the Keychain.
     @discardableResult
     static func store(key: String, value: String) -> Bool {
@@ -15,7 +17,7 @@ enum KeychainManager {
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.niconuscheler.sprich",
+            kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -29,7 +31,7 @@ enum KeychainManager {
     static func retrieve(key: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.niconuscheler.sprich",
+            kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
@@ -52,7 +54,7 @@ enum KeychainManager {
     static func delete(key: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.niconuscheler.sprich",
+            kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
 
