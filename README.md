@@ -87,7 +87,6 @@ On first launch, Sprich walks you through:
 1. **Accessibility permission** — needed for global keyboard shortcuts and auto-paste
 2. **Microphone permission** — needed to record your voice
 3. **Groq API key** — stored securely in macOS Keychain
-4. **Keychain consent** — macOS will ask for your Mac password; click **Always Allow** so Sprich doesn't have to ask every time you dictate
 
 Additional providers (OpenAI, Deepgram, Claude, Gemini) can be added later in Settings → API Keys.
 
