@@ -37,10 +37,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.removeItem(at: bundleCache)
         }
 
-        // Migrate any API keys from legacy login keychain to Data Protection
-        // Keychain (one-time, idempotent). Must run before anything reads keys.
-        KeychainManager.migrateFromLegacyKeychainIfNeeded()
-
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)
 
