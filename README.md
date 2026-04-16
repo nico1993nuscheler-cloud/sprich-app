@@ -21,6 +21,14 @@ Hold keys → Record → Whisper STT → LLM Cleanup → Auto-paste
 
 Works everywhere: email, Slack, browser, notes, terminal — any text field on macOS.
 
+## How it looks
+
+<p align="center">
+  <img src="assets/sprich-literal.png" alt="Literal mode — hold fn+shift" width="400">
+  <br>
+  <img src="assets/sprich-formal.png" alt="Formal mode — hold fn+control" width="400">
+</p>
+
 ## Three modes
 
 | Mode | Shortcut | What it does |
