@@ -6,7 +6,7 @@
 
 ## Why
 
-Tools like Wispr Flow charge ~$20/month for voice-to-text. Sprich does the same thing for ~$2/month in API costs — and the code is yours to audit, fork, and modify.
+Tools like Wispr Flow charge ~$20/month for voice-to-text. Sprich does the same thing for ~$0/month in API costs — and the code is yours to audit, fork, and modify.
 
 ## How it works
 
