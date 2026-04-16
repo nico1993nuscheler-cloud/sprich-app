@@ -5,7 +5,10 @@ struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
     @State private var currentStep = 0
     @State private var groqKey = ""
+    @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
+    @State private var microphoneGranted = Permissions.isMicrophoneGranted()
 
+    private let permissionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let totalSteps = 5
 
     var body: some View {
@@ -32,6 +35,10 @@ struct OnboardingView: View {
         }
         .frame(width: 500, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
+        .onReceive(permissionTimer) { _ in
+            accessibilityGranted = Permissions.isAccessibilityGranted()
+            microphoneGranted = Permissions.isMicrophoneGranted()
+        }
     }
 
     // MARK: - Shared pieces
@@ -144,7 +151,7 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
 
             HStack(spacing: 10) {
-                if Permissions.isAccessibilityGranted() {
+                if accessibilityGranted {
                     Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     Text("Granted").font(.system(size: 13, weight: .semibold))
                 } else {
@@ -153,7 +160,7 @@ struct OnboardingView: View {
                 }
             }
 
-            if !Permissions.isAccessibilityGranted() {
+            if !accessibilityGranted {
                 Button("Open Accessibility Settings") {
                     Permissions.promptAccessibility()
                 }
@@ -165,8 +172,16 @@ struct OnboardingView: View {
 
             Spacer()
 
-            navRow(primaryLabel: Permissions.isAccessibilityGranted() ? "Continue" : "I've granted access") {
+            navRow(primaryLabel: accessibilityGranted ? "Continue" : "I've granted access") {
                 currentStep = 2
+            }
+        }
+        .onChange(of: accessibilityGranted) { granted in
+            if granted && currentStep == 1 {
+                // Auto-advance after a short delay so the user sees the green checkmark
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if currentStep == 1 { currentStep = 2 }
+                }
             }
         }
     }
@@ -181,7 +196,7 @@ struct OnboardingView: View {
                 .foregroundColor(.secondary)
 
             HStack(spacing: 10) {
-                if Permissions.isMicrophoneGranted() {
+                if microphoneGranted {
                     Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     Text("Granted").font(.system(size: 13, weight: .semibold))
                 } else {
@@ -190,9 +205,12 @@ struct OnboardingView: View {
                 }
             }
 
-            if !Permissions.isMicrophoneGranted() {
+            if !microphoneGranted {
                 Button("Grant Microphone Access") {
-                    Task { _ = await Permissions.requestMicrophone() }
+                    Task {
+                        _ = await Permissions.requestMicrophone()
+                        microphoneGranted = Permissions.isMicrophoneGranted()
+                    }
                 }
                 .buttonStyle(.bordered)
             }
@@ -200,6 +218,13 @@ struct OnboardingView: View {
             Spacer()
 
             navRow(primaryLabel: "Continue") { currentStep = 3 }
+        }
+        .onChange(of: microphoneGranted) { granted in
+            if granted && currentStep == 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    if currentStep == 2 { currentStep = 3 }
+                }
+            }
         }
     }
 
@@ -227,29 +252,6 @@ struct OnboardingView: View {
                     .font(.caption)
             }
 
-            // Keychain consent heads-up — shown BEFORE the prompt appears so
-            // the user knows what to do when macOS asks for their password.
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "lock.shield.fill").foregroundColor(.accentColor)
-                    Text("Next: macOS will ask for your password")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                Text("When you click **Save & Continue**, macOS shows a Keychain dialog:\n“Sprich wants to use your confidential information stored in the Keychain.”\n\nEnter your Mac login password and click **Always Allow** — otherwise Sprich has to ask every single time you dictate.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 0.5)
-            )
-
             Text("You can add OpenAI, Deepgram, Claude or Gemini later from Settings → API Keys.")
                 .font(.caption).foregroundColor(.secondary).padding(.top, 2)
 
@@ -270,11 +272,6 @@ struct OnboardingView: View {
                             key: STTProviderType.groq.keychainKey,
                             value: trimmed
                         )
-                        // Trigger macOS Keychain consent prompt now, while the user
-                        // is still in onboarding context (so the dialog makes sense).
-                        // The first SecItemCopyMatching after a fresh install is what
-                        // surfaces "Sprich wants to use your confidential information".
-                        _ = KeychainManager.retrieve(key: STTProviderType.groq.keychainKey)
                     }
                     currentStep = 4
                 }
