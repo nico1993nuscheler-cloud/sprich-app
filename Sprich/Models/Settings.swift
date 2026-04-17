@@ -62,6 +62,37 @@ enum LLMProviderType: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - Supported Languages
+
+/// A language the user can pin STT to. `code == nil` means "auto-detect".
+/// Codes are ISO 639-1 and passed verbatim to every STT provider
+/// (Whisper via the `language` field, Deepgram via `?language=`).
+struct SupportedLanguage: Hashable {
+    let code: String?
+    let displayName: String
+}
+
+enum AppLanguages {
+    static let all: [SupportedLanguage] = [
+        .init(code: nil,  displayName: "Auto-detect"),
+        .init(code: "en", displayName: "English"),
+        .init(code: "de", displayName: "Deutsch"),
+        .init(code: "es", displayName: "Español"),
+        .init(code: "fr", displayName: "Français"),
+        .init(code: "pt", displayName: "Português"),
+        .init(code: "it", displayName: "Italiano"),
+        .init(code: "nl", displayName: "Nederlands"),
+        .init(code: "pl", displayName: "Polski"),
+        .init(code: "sv", displayName: "Svenska"),
+        .init(code: "tr", displayName: "Türkçe"),
+        .init(code: "ru", displayName: "Русский"),
+        .init(code: "ar", displayName: "العربية"),
+        .init(code: "hi", displayName: "हिन्दी"),
+        .init(code: "zh", displayName: "中文"),
+        .init(code: "ja", displayName: "日本語"),
+    ]
+}
+
 // MARK: - Glossary
 
 struct GlossaryReplacement: Codable, Identifiable, Equatable {
@@ -97,6 +128,11 @@ struct AppSettings: Codable {
     var inputMode: InputMode
     var maxRecordingDuration: Int  // seconds
 
+    /// When true, Formal mode appends a destination-aware hint to its
+    /// system prompt (Slack / Gmail / Google Chat / Messages / docs).
+    /// Literal and Custom modes are never affected.
+    var adaptToSurface: Bool
+
     var hasRequiredAPIKeys: Bool {
         let sttKey = KeychainManager.retrieve(key: sttProvider.keychainKey)
         let llmKey = KeychainManager.retrieve(key: llmProvider.keychainKey)
@@ -128,6 +164,74 @@ struct AppSettings: Codable {
         return mode.defaultBadgeLetter
     }
 
+    // Lenient decoder: any field missing from persisted JSON falls back
+    // to its value in `defaults`. Keeps user settings intact across
+    // upgrades that add new fields (e.g. `adaptToSurface`).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings.defaults
+        self.sttProvider          = (try? c.decode(STTProviderType.self, forKey: .sttProvider))          ?? d.sttProvider
+        self.llmProvider          = (try? c.decode(LLMProviderType.self, forKey: .llmProvider))          ?? d.llmProvider
+        self.groqLLMModel         = (try? c.decode(String.self,          forKey: .groqLLMModel))         ?? d.groqLLMModel
+        self.claudeModel          = (try? c.decode(String.self,          forKey: .claudeModel))          ?? d.claudeModel
+        self.googleModel          = (try? c.decode(String.self,          forKey: .googleModel))          ?? d.googleModel
+        self.openAILLMModel       = (try? c.decode(String.self,          forKey: .openAILLMModel))       ?? d.openAILLMModel
+        self.preferredLanguage    = try? c.decodeIfPresent(String.self,  forKey: .preferredLanguage)
+        self.literalPrompt        = (try? c.decode(String.self,          forKey: .literalPrompt))        ?? d.literalPrompt
+        self.formalPrompt         = (try? c.decode(String.self,          forKey: .formalPrompt))         ?? d.formalPrompt
+        self.customModeEnabled    = (try? c.decode(Bool.self,            forKey: .customModeEnabled))    ?? d.customModeEnabled
+        self.customModeName       = (try? c.decode(String.self,          forKey: .customModeName))       ?? d.customModeName
+        self.customModeBadge      = (try? c.decode(String.self,          forKey: .customModeBadge))      ?? d.customModeBadge
+        self.customModePrompt     = (try? c.decode(String.self,          forKey: .customModePrompt))     ?? d.customModePrompt
+        self.glossaryTerms        = (try? c.decode(String.self,          forKey: .glossaryTerms))        ?? d.glossaryTerms
+        self.glossaryReplacements = (try? c.decode([GlossaryReplacement].self, forKey: .glossaryReplacements)) ?? d.glossaryReplacements
+        self.inputMode            = (try? c.decode(InputMode.self,       forKey: .inputMode))            ?? d.inputMode
+        self.maxRecordingDuration = (try? c.decode(Int.self,             forKey: .maxRecordingDuration)) ?? d.maxRecordingDuration
+        self.adaptToSurface       = (try? c.decode(Bool.self,            forKey: .adaptToSurface))       ?? d.adaptToSurface
+    }
+
+    // Memberwise init is suppressed once we declare `init(from:)`, so
+    // provide it explicitly for `AppSettings.defaults` and tests.
+    init(
+        sttProvider: STTProviderType,
+        llmProvider: LLMProviderType,
+        groqLLMModel: String,
+        claudeModel: String,
+        googleModel: String,
+        openAILLMModel: String,
+        preferredLanguage: String?,
+        literalPrompt: String,
+        formalPrompt: String,
+        customModeEnabled: Bool,
+        customModeName: String,
+        customModeBadge: String,
+        customModePrompt: String,
+        glossaryTerms: String,
+        glossaryReplacements: [GlossaryReplacement],
+        inputMode: InputMode,
+        maxRecordingDuration: Int,
+        adaptToSurface: Bool
+    ) {
+        self.sttProvider = sttProvider
+        self.llmProvider = llmProvider
+        self.groqLLMModel = groqLLMModel
+        self.claudeModel = claudeModel
+        self.googleModel = googleModel
+        self.openAILLMModel = openAILLMModel
+        self.preferredLanguage = preferredLanguage
+        self.literalPrompt = literalPrompt
+        self.formalPrompt = formalPrompt
+        self.customModeEnabled = customModeEnabled
+        self.customModeName = customModeName
+        self.customModeBadge = customModeBadge
+        self.customModePrompt = customModePrompt
+        self.glossaryTerms = glossaryTerms
+        self.glossaryReplacements = glossaryReplacements
+        self.inputMode = inputMode
+        self.maxRecordingDuration = maxRecordingDuration
+        self.adaptToSurface = adaptToSurface
+    }
+
     static var defaults: AppSettings {
         AppSettings(
             sttProvider: .groq,
@@ -146,7 +250,8 @@ struct AppSettings: Codable {
             glossaryTerms: "",
             glossaryReplacements: [],
             inputMode: .holdToTalk,
-            maxRecordingDuration: 300
+            maxRecordingDuration: 300,
+            adaptToSurface: true
         )
     }
 }

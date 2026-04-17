@@ -14,6 +14,9 @@ class PipelineCoordinator {
     private let llmService = LLMService()
 
     private var currentMode: TranscriptionMode?
+    /// Bundle ID of the frontmost app captured at hotkey-press time.
+    /// Used later to resolve the destination `Surface` for Formal mode.
+    private var capturedBundleID: String?
 
     init(appState: AppState) {
         self.appState = appState
@@ -63,6 +66,9 @@ class PipelineCoordinator {
 
         do {
             currentMode = mode
+            // Snapshot the frontmost app BEFORE any HUD appears. Sprich's
+            // panel is non-activating, so this remains the user's target.
+            capturedBundleID = SurfaceDetector.captureFrontmostBundleID()
             try recorder.startRecording()
             appState.status = .recording(mode)
             RecordingOverlayController.shared.show(
@@ -104,7 +110,23 @@ class PipelineCoordinator {
                 includePunctuationHint: (mode == .literal)
             )
 
-            // 3. Transcribe via STT
+            // 3. Kick off surface resolution in parallel with STT — but
+            // ONLY for Formal mode with the setting on. Literal and
+            // Custom never consume the result, and launching AppleScript
+            // against a browser frontmost app can (a) trigger a TCC
+            // Automation prompt that gates CGEvent dispatch system-wide
+            // and (b) burn main-thread cycles via Apple Events bouncing.
+            // Keeping Literal's release-to-paste path zero-cost is the
+            // whole point of Literal mode.
+            let bundleIDSnapshot = capturedBundleID
+            let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
+            let surfaceTask: Task<Surface, Never>? = shouldResolveSurface
+                ? Task.detached(priority: .userInitiated) {
+                    await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+                }
+                : nil
+
+            // 4. Transcribe via STT
             let rawTranscript = try await sttService.transcribe(
                 audioData: audioData,
                 provider: appState.settings.sttProvider,
@@ -141,10 +163,21 @@ class PipelineCoordinator {
                 // Formal + Custom: use LLM to restructure
                 RecordingOverlayController.shared.showTranscribedText(corrected)
 
+                // Await the surface resolution launched before STT.
+                // `nil` when adaptToSurface is off → fall back to
+                // `.generic`, which leaves the prompt unchanged.
+                // Worst case (browser AppleScript denied) also returns
+                // `.generic` from the detector.
+                let surface = await surfaceTask?.value ?? .generic
+                #if DEBUG
+                print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(surface.debugLabel)")
+                #endif
+
                 finalText = try await llmService.cleanup(
                     rawText: corrected,
                     mode: mode,
-                    settings: appState.settings
+                    settings: appState.settings,
+                    surface: surface
                 )
                 let t3 = CFAbsoluteTimeGetCurrent()
                 #if DEBUG
