@@ -110,14 +110,21 @@ class PipelineCoordinator {
                 includePunctuationHint: (mode == .literal)
             )
 
-            // 3. Kick off surface resolution in parallel with STT.
-            // For native apps this is a cheap dictionary lookup; for
-            // browsers it runs AppleScript to read the active tab URL.
-            // Either way the latency is hidden behind the STT request.
+            // 3. Kick off surface resolution in parallel with STT — but
+            // ONLY for Formal mode with the setting on. Literal and
+            // Custom never consume the result, and launching AppleScript
+            // against a browser frontmost app can (a) trigger a TCC
+            // Automation prompt that gates CGEvent dispatch system-wide
+            // and (b) burn main-thread cycles via Apple Events bouncing.
+            // Keeping Literal's release-to-paste path zero-cost is the
+            // whole point of Literal mode.
             let bundleIDSnapshot = capturedBundleID
-            let surfaceTask = Task.detached(priority: .userInitiated) {
-                await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
-            }
+            let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
+            let surfaceTask: Task<Surface, Never>? = shouldResolveSurface
+                ? Task.detached(priority: .userInitiated) {
+                    await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+                }
+                : nil
 
             // 4. Transcribe via STT
             let rawTranscript = try await sttService.transcribe(
@@ -157,9 +164,11 @@ class PipelineCoordinator {
                 RecordingOverlayController.shared.showTranscribedText(corrected)
 
                 // Await the surface resolution launched before STT.
-                // Worst case (browser AppleScript denied) it returns
+                // `nil` when adaptToSurface is off → fall back to
                 // `.generic`, which leaves the prompt unchanged.
-                let surface = await surfaceTask.value
+                // Worst case (browser AppleScript denied) also returns
+                // `.generic` from the detector.
+                let surface = await surfaceTask?.value ?? .generic
                 #if DEBUG
                 print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(surface.debugLabel)")
                 #endif
