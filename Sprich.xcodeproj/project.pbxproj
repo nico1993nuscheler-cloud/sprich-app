@@ -27,6 +27,8 @@
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021; };
 		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022; };
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023; };
+		A10000021 /* Surface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000024; };
+		A10000022 /* SurfaceDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000025; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -53,6 +55,8 @@
 		B10000021 /* RecordingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingOverlay.swift; sourceTree = "<group>"; };
 		B10000022 /* TextPostProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPostProcessor.swift; sourceTree = "<group>"; };
 		B10000023 /* ShortcutHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHelpView.swift; sourceTree = "<group>"; };
+		B10000024 /* Surface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surface.swift; sourceTree = "<group>"; };
+		B10000025 /* SurfaceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceDetector.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -101,6 +105,7 @@
 				B10000008 /* PipelineCoordinator.swift */,
 				B10000009 /* SprichError.swift */,
 				B10000022 /* TextPostProcessor.swift */,
+				B10000025 /* SurfaceDetector.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -110,6 +115,7 @@
 			children = (
 				B10000010 /* TranscriptionMode.swift */,
 				B10000011 /* Settings.swift */,
+				B10000024 /* Surface.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -231,6 +237,8 @@
 				A10000018 /* RecordingOverlay.swift in Sources */,
 				A10000019 /* TextPostProcessor.swift in Sources */,
 				A10000020 /* ShortcutHelpView.swift in Sources */,
+				A10000021 /* Surface.swift in Sources */,
+				A10000022 /* SurfaceDetector.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

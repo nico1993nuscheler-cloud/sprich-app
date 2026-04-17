@@ -14,6 +14,9 @@ class PipelineCoordinator {
     private let llmService = LLMService()
 
     private var currentMode: TranscriptionMode?
+    /// Bundle ID of the frontmost app captured at hotkey-press time.
+    /// Used later to resolve the destination `Surface` for Formal mode.
+    private var capturedBundleID: String?
 
     init(appState: AppState) {
         self.appState = appState
@@ -63,6 +66,9 @@ class PipelineCoordinator {
 
         do {
             currentMode = mode
+            // Snapshot the frontmost app BEFORE any HUD appears. Sprich's
+            // panel is non-activating, so this remains the user's target.
+            capturedBundleID = SurfaceDetector.captureFrontmostBundleID()
             try recorder.startRecording()
             appState.status = .recording(mode)
             RecordingOverlayController.shared.show(
@@ -104,7 +110,16 @@ class PipelineCoordinator {
                 includePunctuationHint: (mode == .literal)
             )
 
-            // 3. Transcribe via STT
+            // 3. Kick off surface resolution in parallel with STT.
+            // For native apps this is a cheap dictionary lookup; for
+            // browsers it runs AppleScript to read the active tab URL.
+            // Either way the latency is hidden behind the STT request.
+            let bundleIDSnapshot = capturedBundleID
+            let surfaceTask = Task.detached(priority: .userInitiated) {
+                await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+            }
+
+            // 4. Transcribe via STT
             let rawTranscript = try await sttService.transcribe(
                 audioData: audioData,
                 provider: appState.settings.sttProvider,
@@ -141,10 +156,19 @@ class PipelineCoordinator {
                 // Formal + Custom: use LLM to restructure
                 RecordingOverlayController.shared.showTranscribedText(corrected)
 
+                // Await the surface resolution launched before STT.
+                // Worst case (browser AppleScript denied) it returns
+                // `.generic`, which leaves the prompt unchanged.
+                let surface = await surfaceTask.value
+                #if DEBUG
+                print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(surface.debugLabel)")
+                #endif
+
                 finalText = try await llmService.cleanup(
                     rawText: corrected,
                     mode: mode,
-                    settings: appState.settings
+                    settings: appState.settings,
+                    surface: surface
                 )
                 let t3 = CFAbsoluteTimeGetCurrent()
                 #if DEBUG

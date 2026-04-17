@@ -24,6 +24,21 @@ class LLMService {
         return seconds
     }
 
+    /// Append the surface's prompt hint to the base system prompt when
+    /// surface adaptation applies. Pure/static so it can be unit tested
+    /// without touching any provider or settings side effects.
+    static func composeSystemPrompt(
+        base: String,
+        mode: TranscriptionMode,
+        surface: Surface,
+        adaptToSurface: Bool
+    ) -> String {
+        guard adaptToSurface, mode == .formal else { return base }
+        let hint = surface.promptHint
+        guard !hint.isEmpty else { return base }
+        return base + "\n\n" + hint
+    }
+
     private static func throwIfRateLimited(
         _ http: HTTPURLResponse,
         provider: LLMProviderType
@@ -37,10 +52,16 @@ class LLMService {
     }
 
     /// Clean up transcribed text using the configured LLM provider.
+    /// `surface` is the resolved destination (email / slack / docs / …)
+    /// and is only applied when `mode == .formal` and
+    /// `settings.adaptToSurface == true`. Literal bypasses LLM entirely
+    /// and Custom is intentionally left untouched so user-authored
+    /// prompts aren't overridden.
     func cleanup(
         rawText: String,
         mode: TranscriptionMode,
-        settings: AppSettings
+        settings: AppSettings,
+        surface: Surface = .generic
     ) async throws -> String {
         let sanitizedText = InputSanitizer.sanitize(rawText)
 
@@ -48,7 +69,12 @@ class LLMService {
             throw SprichError.emptyTranscription
         }
 
-        let systemPrompt = settings.promptForMode(mode)
+        let systemPrompt = Self.composeSystemPrompt(
+            base: settings.promptForMode(mode),
+            mode: mode,
+            surface: surface,
+            adaptToSurface: settings.adaptToSurface
+        )
 
         switch settings.llmProvider {
         case .groq:
