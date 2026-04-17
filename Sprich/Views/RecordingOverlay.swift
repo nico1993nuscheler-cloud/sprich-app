@@ -109,6 +109,9 @@ class RecordingOverlayState: ObservableObject {
     // not a fixed clock. Near-silent → drifts slowly. Loud speech → darts.
     @Published var scannerLeader: Double = 0           // 0 ... (segmentCount - 1)
     @Published var scannerSmoothedLevel: Float = 0     // EMA of audioLevel for brightness
+    /// Smoothed sweep sign in [-1, 1]. Lerps toward ±1 at direction flips so the
+    /// bar's horizontal lean eases through the turnaround instead of snapping.
+    @Published var scannerSweepSign: Double = 1.0
 
     private var scannerDirection: Double = 1.0
     private var scannerTimer: Timer?
@@ -131,6 +134,7 @@ class RecordingOverlayState: ObservableObject {
         stopScanner()
         scannerLeader = 0
         scannerDirection = 1
+        scannerSweepSign = 1
         scannerSmoothedLevel = 0
         lastTick = CACurrentMediaTime()
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -170,6 +174,12 @@ class RecordingOverlayState: ObservableObject {
             scannerDirection = 1
         }
         scannerLeader = pos
+
+        // Ease the published sweep sign toward the current direction so
+        // direction flips produce a spring-like horizontal lean reversal
+        // instead of snapping the whole bar sideways in one frame.
+        let signBlend: Double = 0.15
+        scannerSweepSign += signBlend * (scannerDirection - scannerSweepSign)
     }
 }
 
@@ -319,6 +329,10 @@ struct KITTScannerBar: View {
     private let segmentCount = 11
     private let trailWidth: Double = 3.2   // how many neighbors glow behind the leader
 
+    // Physicality constants — louder audio → more motion. Tune here.
+    private let maxSway: CGFloat = 6.0     // horizontal lean of the whole bar, pt
+    private let bendAmp: CGFloat = 8.0     // peak vertical bulge at the leader, pt
+
     var body: some View {
         let leaderPos = state.scannerLeader
         let rawLevel = CGFloat(state.scannerSmoothedLevel)
@@ -332,11 +346,23 @@ struct KITTScannerBar: View {
         let audioBoost = 0.60 + shapedLevel * 0.70
         let floorBrightness = 0.22 + shapedLevel * 0.15
 
+        // Whole-bar horizontal lean: follows the sweep direction, scaled by loudness.
+        let swayX = CGFloat(state.scannerSweepSign * shapedLevel) * maxSway
+
         HStack(spacing: 2) {
             ForEach(0..<segmentCount, id: \.self) { i in
-                let dist = abs(Double(i) - leaderPos)
-                let baseFalloff = max(0, 1.0 - dist / trailWidth)
+                let signedDist = Double(i) - leaderPos
+                let absDist = abs(signedDist)
+                let baseFalloff = max(0, 1.0 - absDist / trailWidth)
                 let bright = min(1.25, baseFalloff * audioBoost + floorBrightness)
+
+                // Per-segment vertical bend — a bell around the leader so the
+                // bar forms a traveling wave crest instead of a flat strip.
+                // Segments beyond ±trailWidth from the leader sit flat.
+                let bendShape = absDist < trailWidth
+                    ? cos(signedDist / trailWidth * .pi / 2)
+                    : 0.0
+                let bumpY = -CGFloat(bendShape * shapedLevel) * bendAmp
 
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(color.opacity(min(1.0, bright)))
@@ -348,8 +374,10 @@ struct KITTScannerBar: View {
                         color: color.opacity(bright * 0.95),
                         radius: 2.5 + CGFloat(bright) * 5
                     )
+                    .offset(y: bumpY)
             }
         }
+        .offset(x: swayX)
         .onAppear {
             state.scannerMaxIndex = Double(segmentCount - 1)
         }

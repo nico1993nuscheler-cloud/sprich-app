@@ -274,12 +274,14 @@ struct SettingsView: View {
                         get: { appState.settings.preferredLanguage ?? "auto" },
                         set: { appState.settings.preferredLanguage = $0 == "auto" ? nil : $0 }
                     )) {
-                        Text("Auto-detect").tag("auto")
-                        Text("Deutsch").tag("de")
-                        Text("English").tag("en")
+                        ForEach(AppLanguages.all, id: \.code) { lang in
+                            Text(lang.displayName).tag(lang.code ?? "auto")
+                        }
                     }
                     .labelsHidden()
-                    .pickerStyle(.segmented)
+                    .pickerStyle(.menu)
+                    Text("Pin STT to a specific language, or let the provider detect it.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 saveBar()
@@ -339,6 +341,13 @@ struct SettingsView: View {
                         .font(.caption)
                         Spacer()
                     }
+
+                    Divider().padding(.vertical, 4)
+
+                    Toggle("Adapt tone to destination app", isOn: $appState.settings.adaptToSurface)
+                        .toggleStyle(.switch)
+                    Text("Matches the rewrite to where you're pasting — email greeting for Gmail/Mail, terse for Slack/Teams/Messages, clean prose for docs. Reads the active browser tab URL for web apps (requires one-time Automation permission).")
+                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 card {
