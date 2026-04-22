@@ -18,6 +18,10 @@ struct SettingsView: View {
     @State private var newGlossaryFrom = ""
     @State private var newGlossaryTo = ""
 
+    // Local Whisper model download sheet
+    @State private var showModelDownload = false
+    @ObservedObject private var whisperManager = WhisperModelManager.shared
+
     var body: some View {
         TabView {
             apiKeysTab
@@ -36,9 +40,107 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
         }
         .frame(width: 620, height: 620)
-        .onAppear(perform: loadKeys)
+        .onAppear {
+            loadKeys()
+            whisperManager.refreshState(for: appState.settings.localWhisperModel)
+        }
         .alert("Settings Saved", isPresented: $showSavedAlert) {
             Button("OK", role: .cancel) {}
+        }
+        .sheet(isPresented: $showModelDownload) {
+            ModelDownloadView(
+                model: appState.settings.localWhisperModel,
+                onDone: { showModelDownload = false },
+                onCancel: {
+                    showModelDownload = false
+                    // If the user abandons the download, flip the provider
+                    // back to Groq so a hotkey press doesn't dead-end.
+                    if appState.settings.sttProvider.isLocal {
+                        appState.settings.sttProvider = .groq
+                        appState.saveSettings()
+                    }
+                }
+            )
+        }
+    }
+
+    // MARK: - Local Whisper status row
+
+    @ViewBuilder
+    private var localWhisperStatus: some View {
+        let modelName = appState.settings.localWhisperModel
+
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: statusIconName)
+                .foregroundStyle(statusIconColor)
+                .font(.system(size: 16))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(modelName)
+                    .font(.system(.caption, design: .monospaced))
+                Text(statusSubline)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            switch whisperManager.state {
+            case .ready:
+                Button("Delete") {
+                    try? whisperManager.deleteModel(modelName)
+                }
+                .controlSize(.small)
+            case .downloading:
+                Button("Cancel") { whisperManager.cancelDownload() }
+                    .controlSize(.small)
+            case .preparing:
+                ProgressView().controlSize(.small)
+            default:
+                Button("Download") { showModelDownload = true }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.08))
+        )
+    }
+
+    private var statusIconName: String {
+        switch whisperManager.state {
+        case .ready: return "checkmark.circle.fill"
+        case .downloading: return "arrow.down.circle"
+        case .preparing: return "gearshape.2"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .absent, .unknown: return "arrow.down.circle.dotted"
+        }
+    }
+
+    private var statusIconColor: Color {
+        switch whisperManager.state {
+        case .ready: return .green
+        case .failed: return .red
+        default: return .secondary
+        }
+    }
+
+    private var statusSubline: String {
+        switch whisperManager.state {
+        case .ready(_, let size):
+            let fmt = ByteCountFormatter(); fmt.countStyle = .file
+            return "Ready · \(fmt.string(fromByteCount: size)) on disk"
+        case .downloading(let p):
+            return "Downloading \(Int(p * 100))%"
+        case .preparing:
+            return "Preparing (Core ML compile)…"
+        case .failed(let msg):
+            return msg
+        case .absent, .unknown:
+            return "Not downloaded"
         }
     }
 
@@ -207,7 +309,9 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                     providerDescription(for: appState.settings.sttProvider)
 
-                    if !hasKey(forSTT: appState.settings.sttProvider) {
+                    if appState.settings.sttProvider.isLocal {
+                        localWhisperStatus
+                    } else if !hasKey(forSTT: appState.settings.sttProvider) {
                         missingKeyBanner(
                             providerName: appState.settings.sttProvider.displayName,
                             kind: "STT"
@@ -631,6 +735,8 @@ struct SettingsView: View {
                 Text("Standard Whisper API (~$0.006/min). Most reliable.")
             case .deepgram:
                 Text("Nova-3 model (~$0.008/min). Excellent real-time performance.")
+            case .local:
+                Text("Runs fully on-device with WhisperKit — no network, no API key. ~626 MB one-time download.")
             }
         }
         .font(.caption)
@@ -642,6 +748,9 @@ struct SettingsView: View {
     private func hasKey(forSTT provider: STTProviderType) -> Bool {
         // Re-read from Keychain each body re-eval; cheap and always current.
         _ = groqKey; _ = openAIKey; _ = deepgramKey  // force dependency on @State
+        // Local provider needs a downloaded model, not an API key —
+        // treat as "has key" so the missing-key banner doesn't fire.
+        if provider.isLocal { return true }
         guard let v = KeychainManager.retrieve(key: provider.keychainKey) else { return false }
         return !v.isEmpty
     }

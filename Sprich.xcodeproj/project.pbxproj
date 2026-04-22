@@ -29,6 +29,11 @@
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023; };
 		A10000021 /* Surface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000024; };
 		A10000022 /* SurfaceDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000025; };
+		A10000023 /* WhisperModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000026; };
+		A10000024 /* LocalWhisperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000027; };
+		A10000025 /* PCMConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000028; };
+		A10000026 /* ModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000029; };
+		A10000027 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = H10000001 /* WhisperKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +62,10 @@
 		B10000023 /* ShortcutHelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutHelpView.swift; sourceTree = "<group>"; };
 		B10000024 /* Surface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surface.swift; sourceTree = "<group>"; };
 		B10000025 /* SurfaceDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceDetector.swift; sourceTree = "<group>"; };
+		B10000026 /* WhisperModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperModelManager.swift; sourceTree = "<group>"; };
+		B10000027 /* LocalWhisperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalWhisperService.swift; sourceTree = "<group>"; };
+		B10000028 /* PCMConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConverter.swift; sourceTree = "<group>"; };
+		B10000029 /* ModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -64,6 +73,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000027 /* WhisperKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -106,8 +116,19 @@
 				B10000009 /* SprichError.swift */,
 				B10000022 /* TextPostProcessor.swift */,
 				B10000025 /* SurfaceDetector.swift */,
+				D10000009 /* ASR */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		D10000009 /* ASR */ = {
+			isa = PBXGroup;
+			children = (
+				B10000026 /* WhisperModelManager.swift */,
+				B10000027 /* LocalWhisperService.swift */,
+				B10000028 /* PCMConverter.swift */,
+			);
+			path = ASR;
 			sourceTree = "<group>";
 		};
 		D10000004 /* Models */ = {
@@ -137,6 +158,7 @@
 				B10000016 /* OnboardingView.swift */,
 				B10000023 /* ShortcutHelpView.swift */,
 				B10000021 /* RecordingOverlay.swift */,
+				B10000029 /* ModelDownloadView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -165,6 +187,9 @@
 			dependencies = (
 			);
 			name = Sprich;
+			packageProductDependencies = (
+				H10000001 /* WhisperKit */,
+			);
 			productName = Sprich;
 			productReference = B10000020 /* Sprich.app */;
 			productType = "com.apple.product-type.application";
@@ -193,6 +218,9 @@
 				Base,
 			);
 			mainGroup = D10000001;
+			packageReferences = (
+				G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
+			);
 			productRefGroup = D10000008 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -239,6 +267,10 @@
 				A10000020 /* ShortcutHelpView.swift in Sources */,
 				A10000021 /* Surface.swift in Sources */,
 				A10000022 /* SurfaceDetector.swift in Sources */,
+				A10000023 /* WhisperModelManager.swift in Sources */,
+				A10000024 /* LocalWhisperService.swift in Sources */,
+				A10000025 /* PCMConverter.swift in Sources */,
+				A10000026 /* ModelDownloadView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -365,6 +397,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/argmax-oss-swift";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.18.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		H10000001 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = E10000004 /* Project object */;
