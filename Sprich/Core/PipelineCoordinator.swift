@@ -56,9 +56,20 @@ class PipelineCoordinator {
             }
         }
 
-        // Only check STT key — literal mode doesn't need LLM
-        let sttKey = KeychainManager.retrieve(key: appState.settings.sttProvider.keychainKey)
-        if sttKey == nil {
+        // STT readiness check: cloud providers need an API key;
+        // local (on-device Whisper) needs the model downloaded.
+        // Literal mode doesn't need an LLM so we only check STT here.
+        let provider = appState.settings.sttProvider
+        if provider.isLocal {
+            if !WhisperModelManager.shared.state.isReady {
+                appState.status = .error("Local Whisper model not downloaded")
+                showNotification(
+                    title: "Sprich",
+                    body: "Open Settings → Speech to Text → Local to download the model."
+                )
+                return
+            }
+        } else if KeychainManager.retrieve(key: provider.keychainKey) == nil {
             appState.status = .error("STT API key not configured")
             showNotification(title: "Sprich", body: "Please configure your STT API key in Settings.")
             return
