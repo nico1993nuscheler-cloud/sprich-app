@@ -58,22 +58,56 @@ actor LocalWhisperService {
         }
 
         let t0 = CFAbsoluteTimeGetCurrent()
+        let baseURL = await WhisperModelManager.shared.baseURL
         let task = Task<Void, Error> { [modelFolder] in
             #if DEBUG
             print("[Sprich][Local] prewarm: constructing WhisperKit at \(modelFolder.path)")
+            print("[Sprich][Local] prewarm: downloadBase=\(baseURL.path), tokenizerFolder=\(modelFolder.path)")
             #endif
+
+            // Explicitly resolve every path WhisperKit might look at
+            // locally, so it never silently falls back to a HuggingFace
+            // download that can hang behind slow/blocked networks. The
+            // turbo variant in particular was never returning from
+            // `init(config)` — the most likely culprit is tokenizer
+            // resolution: without `tokenizerFolder` or `downloadBase`,
+            // WhisperKit's HubApi tries to fetch tokenizer.json from
+            // the network.
+            //
+            // Also flipping `prewarm: false`. `prewarm: true` tells
+            // WhisperKit to eagerly warm the Core ML graph inside the
+            // init call. If *that* phase is the one hanging on the
+            // turbo variant, we'd never escape `init(config)`. With
+            // `prewarm: false`, init returns as soon as the model is
+            // loaded; the first transcribe pays a slightly higher
+            // latency (WhisperKit warms lazily on demand) but we'd
+            // rather trade a bit of first-call latency for a pipeline
+            // that actually returns.
+            //
+            // `logLevel: .debug` temporarily routes WhisperKit's own
+            // internal logs to the Xcode console so the next hang
+            // report has visibility into what WhisperKit itself is
+            // doing.
             let config = WhisperKitConfig(
                 model: model,
+                downloadBase: baseURL,
                 modelFolder: modelFolder.path,
-                verbose: false,
-                logLevel: .error,
-                prewarm: true,
+                tokenizerFolder: modelFolder,
+                verbose: true,
+                logLevel: .debug,
+                prewarm: false,
                 load: true,
                 download: false
             )
+
+            #if DEBUG
+            let tInit = CFAbsoluteTimeGetCurrent()
+            print("[Sprich][Local] prewarm: calling try await WhisperKit(config) …")
+            #endif
             let loaded = try await WhisperKit(config)
             #if DEBUG
-            print("[Sprich][Local] prewarm: WhisperKit constructed, installing pipe")
+            let initMs = Int((CFAbsoluteTimeGetCurrent() - tInit) * 1000)
+            print("[Sprich][Local] prewarm: WhisperKit constructed in \(initMs)ms, installing pipe")
             #endif
             await self.setPipe(loaded, model: model)
         }
