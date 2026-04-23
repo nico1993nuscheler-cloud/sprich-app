@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import UserNotifications
 
 /// Orchestrates the full dictation pipeline:
@@ -89,12 +90,16 @@ class PipelineCoordinator {
         // STT readiness check: cloud providers need an API key;
         // local (on-device Whisper) needs the model downloaded.
         // Literal mode doesn't need an LLM so we only check STT here.
+        //
+        // When a guard fails we surface the problem visibly — the recording
+        // overlay never appears, so silent errors feel like the app broke.
+        // `surfaceBlockingError` posts a Notification Center alert AND an
+        // NSAlert fallback when notifications aren't granted.
         if provider.isLocal {
             if !WhisperModelManager.shared.state.isReady {
-                appState.status = .error("Local Whisper model not downloaded")
-                showNotification(
-                    title: "Sprich",
-                    body: "Open Settings → Speech to Text → Local to download the model."
+                surfaceBlockingError(
+                    title: "Local Whisper model not downloaded",
+                    body: "Open Sprich Settings → Providers → Local to download the ~626 MB model. Local is your default — Sprich will not silently switch to a cloud provider."
                 )
                 return
             }
@@ -105,8 +110,14 @@ class PipelineCoordinator {
                 model: appState.settings.localWhisperModel
             )
         } else if KeychainManager.retrieve(key: provider.keychainKey) == nil {
-            appState.status = .error("STT API key not configured")
-            showNotification(title: "Sprich", body: "Please configure your STT API key in Settings.")
+            // Cloud configured but no key. If we're offline AND the local
+            // model is on disk, effectiveProviderForThisDictation() already
+            // would have flipped us to .local — so reaching here with a
+            // missing key means: cloud configured, online, key missing.
+            surfaceBlockingError(
+                title: "STT API key missing for \(provider.displayName)",
+                body: "Open Sprich Settings → API Keys and paste the \(provider.displayName) key, or switch to Local (offline) in Providers."
+            )
             return
         }
 
@@ -250,7 +261,6 @@ class PipelineCoordinator {
 
         } catch {
             RecordingOverlayController.shared.dismiss()
-            appState.status = .error(error.localizedDescription)
 
             let errorMessage: String
             if let sprichError = error as? SprichError {
@@ -260,18 +270,13 @@ class PipelineCoordinator {
             }
 
             #if DEBUG
-            // Also log to Xcode console so dev debugging doesn't depend
-            // on Notification Center permission being granted.
             print("[Sprich] ❌ Pipeline error: \(errorMessage) — raw: \(error)")
             #endif
 
-            showNotification(title: "Sprich Error", body: errorMessage)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                if case .error = self?.appState.status {
-                    self?.appState.status = .ready
-                }
-            }
+            // Use the same visible-error surface the pre-recording guards
+            // use. `surfaceBlockingError` also handles the auto-clear of
+            // the error status 3 s later, so no need to repeat that here.
+            surfaceBlockingError(title: "Sprich Error", body: errorMessage)
         }
 
         currentMode = nil
@@ -285,7 +290,52 @@ class PipelineCoordinator {
         RecordingOverlayController.shared.dismiss()
     }
 
-    // MARK: - Notifications
+    // MARK: - Error surfacing
+
+    /// Surface a fatal-for-this-dictation error so the user understands
+    /// why their hotkey press produced nothing. Sets `.error` status,
+    /// posts a Notification Center alert, AND — if notifications aren't
+    /// authorised — falls back to an NSAlert so the problem is never
+    /// silent. Menubar icon also flips to a warning symbol via the
+    /// AppState.status observer in AppDelegate.
+    private func surfaceBlockingError(title: String, body: String) {
+        appState.status = .error(title)
+        showNotification(title: title, body: body)
+
+        #if DEBUG
+        print("[Sprich] ⛔️ \(title) — \(body)")
+        #endif
+
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus != .authorized else { return }
+            // Not granted (or never asked). Notification Center would
+            // silently drop the alert we just queued, so surface an
+            // NSAlert instead — same info, but guaranteed to appear.
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = title
+                alert.informativeText = body
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Open Settings")
+                alert.addButton(withTitle: "Dismiss")
+                NSApp.activate(ignoringOtherApps: true)
+                if alert.runModal() == .alertFirstButtonReturn {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("sprich.requestOpenSettings"),
+                        object: nil
+                    )
+                }
+            }
+        }
+
+        // Auto-clear the error status after 3 s so the menubar icon
+        // doesn't sit in "error" forever.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            if case .error = self?.appState.status {
+                self?.appState.status = .ready
+            }
+        }
+    }
 
     private func showNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()

@@ -124,7 +124,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Local dictation won't work until the model is downloaded.")
                             .font(.system(size: 12, weight: .semibold))
-                        Text("Click Download above. ~626 MB, one-time. Sprich will fall back to Groq when online if you haven't downloaded yet.")
+                        Text("Click Download above. ~626 MB, one-time. Local is your default — Sprich will not silently switch to a cloud provider if the model is missing.")
                             .font(.caption).foregroundColor(.secondary)
                     }
                 }
