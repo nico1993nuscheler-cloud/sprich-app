@@ -242,7 +242,16 @@ struct SettingsView: View {
         switch whisperManager.state {
         case .ready(_, let size):
             let fmt = ByteCountFormatter(); fmt.countStyle = .file
-            return "Ready · \(fmt.string(fromByteCount: size)) on disk"
+            let sizeStr = fmt.string(fromByteCount: size)
+            // .ready means bytes on disk. If the pipe hasn't warmed yet
+            // the user needs to know — otherwise a hotkey press blocks
+            // on a load they can't see. The flag flips to true when
+            // LocalWhisperService finishes constructing WhisperKit.
+            if whisperManager.isPipeReady {
+                return "Ready · \(sizeStr) on disk"
+            } else {
+                return "Loading Core ML model… · \(sizeStr) on disk"
+            }
         case .downloading(let p):
             return "Downloading \(Int(p * 100))%"
         case .preparing:

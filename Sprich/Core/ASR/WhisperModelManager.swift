@@ -42,6 +42,31 @@ final class WhisperModelManager: ObservableObject {
 
     @Published private(set) var state: ModelState = .unknown
 
+    /// Separate from `state` because "model bytes on disk" (which
+    /// `state == .ready` signals) does NOT imply "Core ML pipe compiled
+    /// and loaded in memory". The compile step can take anywhere from
+    /// a few seconds on second-and-subsequent app launches (Core ML
+    /// caches the compiled graph) to several minutes on the very first
+    /// launch after downloading a model on a slower or memory-pressured
+    /// Mac. Until the pipe finishes warming, a hotkey press would
+    /// silently block inside `LocalWhisperService.transcribe` awaiting
+    /// the in-flight load task. Observers (Settings chip, menubar,
+    /// `PipelineCoordinator.startRecording` guard) use this flag to
+    /// surface a friendly "still warming up" message instead.
+    @Published private(set) var isPipeReady: Bool = false
+
+    /// Called by `LocalWhisperService` when a pipe successfully loads.
+    func markPipeReady() {
+        isPipeReady = true
+    }
+
+    /// Called by `LocalWhisperService` when it starts a new load or
+    /// unloads an existing pipe (e.g. because the user switched
+    /// Whisper tiers in Settings).
+    func markPipeNotReady() {
+        isPipeReady = false
+    }
+
     /// Absolute URL WhisperKit will download into. A model ends up at
     /// `<baseURL>/models/argmaxinc/whisperkit-coreml/openai_whisper-<variant>/...`.
     /// (The extra `/models/` segment is inserted by `HubApi` inside

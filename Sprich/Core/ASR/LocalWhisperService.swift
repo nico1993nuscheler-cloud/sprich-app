@@ -59,6 +59,12 @@ actor LocalWhisperService {
 
         let t0 = CFAbsoluteTimeGetCurrent()
         let baseURL = await WhisperModelManager.shared.baseURL
+        // Publish "pipe is loading" immediately so UI observers
+        // (Settings chip, menubar header, recording guard) can show
+        // the loading state before WhisperKit init returns.
+        await MainActor.run {
+            WhisperModelManager.shared.markPipeNotReady()
+        }
         let task = Task<Void, Error> { [modelFolder] in
             #if DEBUG
             print("[Sprich][Local] prewarm: constructing WhisperKit at \(modelFolder.path)")
@@ -110,6 +116,12 @@ actor LocalWhisperService {
             print("[Sprich][Local] prewarm: WhisperKit constructed in \(initMs)ms, installing pipe")
             #endif
             await self.setPipe(loaded, model: model)
+            // Publish pipe-ready from the @MainActor manager so SwiftUI
+            // views observing `@Published isPipeReady` re-render the
+            // moment the hotkey path becomes usable.
+            await MainActor.run {
+                WhisperModelManager.shared.markPipeReady()
+            }
         }
         loadingTask = task
         defer { loadingTask = nil }
@@ -244,5 +256,8 @@ actor LocalWhisperService {
     func unload() {
         pipe = nil
         loadedModel = nil
+        Task { @MainActor in
+            WhisperModelManager.shared.markPipeNotReady()
+        }
     }
 }
