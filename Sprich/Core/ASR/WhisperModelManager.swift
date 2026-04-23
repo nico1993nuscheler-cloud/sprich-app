@@ -43,10 +43,18 @@ final class WhisperModelManager: ObservableObject {
     @Published private(set) var state: ModelState = .unknown
 
     /// Absolute URL WhisperKit will download into. A model ends up at
-    /// `<baseURL>/argmaxinc/whisperkit-coreml/openai_whisper-<variant>/...`.
+    /// `<baseURL>/models/argmaxinc/whisperkit-coreml/openai_whisper-<variant>/...`.
+    /// (The extra `/models/` segment is inserted by `HubApi` inside
+    /// swift-transformers; we resolve paths through `existingFolder(for:)`
+    /// rather than hard-coding the layout in call sites.)
     let baseURL: URL
 
     private var downloadTask: Task<URL, Error>?
+
+    /// Cache of resolved on-disk folders per model name. Populated by
+    /// `ensureReady` (from the URL `WhisperKit.download` returns) and by
+    /// `existingFolder(for:)` when it scans disk. Cleared on delete.
+    private var knownFolders: [String: URL] = [:]
 
     private init() {
         let fm = FileManager.default
@@ -88,6 +96,13 @@ final class WhisperModelManager: ObservableObject {
                         }
                     }
                 )
+                // Cache the actual URL HubApi wrote to. This is the ground
+                // truth — `existingFolder(for:)`'s path reconstruction used
+                // to miss the `models/` prefix that HubApi inserts, which
+                // made the status chip flicker back to "Not downloaded" the
+                // moment the download sheet closed. Caching side-steps any
+                // future HubApi path convention changes too.
+                self.knownFolders[model] = folder
                 self.state = .preparing
                 // `.ready` is signalled once the bytes are on disk. Core ML
                 // first-compile happens inside LocalWhisperService when it
@@ -107,22 +122,71 @@ final class WhisperModelManager: ObservableObject {
     }
 
     /// Check disk for a previously downloaded model. Returns nil if absent.
+    ///
+    /// Resolution order (stop at first hit):
+    /// 1. In-memory cache (set by a successful `ensureReady` or previous
+    ///    scan). The URL HubApi actually wrote to — ground truth.
+    /// 2. A couple of conventional paths we know HubApi has used. Handles
+    ///    both the current layout (`models/argmaxinc/…`) and a legacy one
+    ///    without the `models/` prefix, so this keeps working if/when
+    ///    WhisperKit tweaks its layout.
+    /// 3. Filesystem scan under `baseURL` for a directory whose last
+    ///    component equals `openai_whisper-<variant>`. Defensive catch-all.
     func existingFolder(for model: String) -> URL? {
-        let candidate = baseURL
-            .appendingPathComponent("argmaxinc", isDirectory: true)
-            .appendingPathComponent("whisperkit-coreml", isDirectory: true)
-            .appendingPathComponent("openai_whisper-\(model)", isDirectory: true)
-        if FileManager.default.fileExists(atPath: candidate.path) {
+        if let cached = knownFolders[model],
+           FileManager.default.fileExists(atPath: cached.path) {
+            return cached
+        }
+        let variantFolder = "openai_whisper-\(model)"
+        let conventionalPaths: [URL] = [
+            baseURL
+                .appendingPathComponent("models", isDirectory: true)
+                .appendingPathComponent("argmaxinc", isDirectory: true)
+                .appendingPathComponent("whisperkit-coreml", isDirectory: true)
+                .appendingPathComponent(variantFolder, isDirectory: true),
+            baseURL
+                .appendingPathComponent("argmaxinc", isDirectory: true)
+                .appendingPathComponent("whisperkit-coreml", isDirectory: true)
+                .appendingPathComponent(variantFolder, isDirectory: true),
+        ]
+        for candidate in conventionalPaths
+        where FileManager.default.fileExists(atPath: candidate.path) {
+            knownFolders[model] = candidate
             return candidate
+        }
+        return scanBaseURL(for: variantFolder, model: model)
+    }
+
+    /// Fallback for when neither the cache nor the conventional paths hit.
+    /// Walks the download root looking for a directory matching the
+    /// variant folder name. Skips the HubApi-internal `.cache` tree so
+    /// we don't accidentally resolve the pre-snapshot download staging
+    /// area as the real model.
+    private func scanBaseURL(for variantFolder: String, model: String) -> URL? {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: baseURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return nil }
+        for case let url as URL in enumerator {
+            if url.pathComponents.contains(".cache") {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard url.lastPathComponent == variantFolder else { continue }
+            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            if isDir {
+                knownFolders[model] = url
+                return url
+            }
         }
         return nil
     }
 
     func refreshState(for model: String) {
-        if existingFolder(for: model) != nil {
-            if let f = existingFolder(for: model) {
-                state = .ready(model: model, sizeBytes: folderSize(f))
-            }
+        if let folder = existingFolder(for: model) {
+            state = .ready(model: model, sizeBytes: folderSize(folder))
         } else {
             state = .absent
         }
@@ -131,6 +195,7 @@ final class WhisperModelManager: ObservableObject {
     func deleteModel(_ model: String) throws {
         guard let folder = existingFolder(for: model) else { return }
         try FileManager.default.removeItem(at: folder)
+        knownFolders.removeValue(forKey: model)
         state = .absent
     }
 
