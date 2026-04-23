@@ -105,6 +105,9 @@ class PipelineCoordinator {
 
     /// Start recording for a given mode (used by hold-to-talk).
     func startRecording(mode: TranscriptionMode) async {
+        #if DEBUG
+        print("[Sprich] startRecording(\(mode.displayName)) — status=\(appState.status)")
+        #endif
         if !Permissions.isMicrophoneGranted() {
             let granted = await Permissions.requestMicrophone()
             if !granted {
@@ -287,17 +290,31 @@ class PipelineCoordinator {
 
     /// Stop recording and process through the pipeline.
     func stopAndProcess() async {
+        #if DEBUG
+        print("[Sprich] stopAndProcess() entered — status=\(appState.status), currentMode=\(currentMode?.displayName ?? "nil")")
+        #endif
         guard case .recording = appState.status,
-              let mode = currentMode else { return }
+              let mode = currentMode else {
+            #if DEBUG
+            print("[Sprich] stopAndProcess ⚠️ guard failed — returning early (status or mode wrong)")
+            #endif
+            return
+        }
 
         appState.status = .processing
         RecordingOverlayController.shared.showProcessing()
+        #if DEBUG
+        print("[Sprich] stopAndProcess: status flipped to .processing, overlay → processing")
+        #endif
 
         do {
             let pipelineStart = CFAbsoluteTimeGetCurrent()
 
             // 1. Stop recording and get audio data
             guard let audioData = try recorder.stopRecording() else {
+                #if DEBUG
+                print("[Sprich] stopAndProcess: recorder.stopRecording returned nil — no audio, dismissing")
+                #endif
                 RecordingOverlayController.shared.dismiss()
                 appState.status = .ready
                 return
@@ -333,12 +350,18 @@ class PipelineCoordinator {
             // startRecording time — the user may have been offline
             // then and we already committed to that fallback.
             let provider = activeProvider ?? appState.settings.sttProvider
+            #if DEBUG
+            print("[Sprich] stopAndProcess: calling sttService.transcribe(provider=\(provider.displayName))…")
+            #endif
             let rawTranscript = try await sttService.transcribe(
                 audioData: audioData,
                 provider: provider,
                 language: appState.settings.preferredLanguage,
                 prompt: whisperPrompt
             )
+            #if DEBUG
+            print("[Sprich] stopAndProcess: sttService.transcribe returned \(rawTranscript.count) chars")
+            #endif
             let t2 = CFAbsoluteTimeGetCurrent()
             #if DEBUG
             print("[Sprich] STT: \(Int((t2 - t1) * 1000))ms \(InputSanitizer.redactForLog(rawTranscript))")
