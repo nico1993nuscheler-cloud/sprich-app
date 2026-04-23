@@ -79,7 +79,43 @@ struct SettingsView: View {
     private var localWhisperStatus: some View {
         let modelName = appState.settings.localWhisperModel
 
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+
+            // Model tier picker. Lets the user trade speed for accuracy
+            // without leaving Settings. Switching to a different variant
+            // flips the local state to reflect that model's on-disk
+            // presence — typically `.absent`, which surfaces the warning
+            // banner and Download button below.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Whisper model")
+                    .font(.caption).foregroundColor(.secondary)
+
+                Picker("", selection: Binding(
+                    get: { appState.settings.localWhisperModel },
+                    set: { newValue in
+                        appState.settings.localWhisperModel = newValue
+                        appState.saveSettings()
+                        whisperManager.refreshState(for: newValue)
+                        // Warm the pipe for the newly-selected model if
+                        // it's already on disk. If not, the warning
+                        // banner routes the user to Download.
+                        TranscriptionService.prewarmLocalWhisperIfReady(model: newValue)
+                    }
+                )) {
+                    ForEach(WhisperModelCatalog.all) { option in
+                        Text(option.displayName).tag(option.variantName)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+
+                if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                    Text(option.subtitle)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: statusIconName)
                     .foregroundStyle(statusIconColor)

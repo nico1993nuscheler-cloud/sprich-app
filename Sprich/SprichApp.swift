@@ -225,21 +225,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Language submenu
+        // Language submenu — mirrors `AppLanguages.all` so the menubar
+        // surfaces every language the Settings picker does. Previous
+        // version hard-coded Auto / Deutsch / English and drifted out
+        // of sync when the 15-language dropdown shipped in 4e1dc68.
         let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
-        let autoLang = NSMenuItem(title: "Auto-detect", action: #selector(setLanguageAuto), keyEquivalent: "")
-        autoLang.target = self
-        autoLang.state = appState.settings.preferredLanguage == nil ? .on : .off
-        langMenu.addItem(autoLang)
-        let deLang = NSMenuItem(title: "Deutsch", action: #selector(setLanguageDE), keyEquivalent: "")
-        deLang.target = self
-        deLang.state = appState.settings.preferredLanguage == "de" ? .on : .off
-        langMenu.addItem(deLang)
-        let enLang = NSMenuItem(title: "English", action: #selector(setLanguageEN), keyEquivalent: "")
-        enLang.target = self
-        enLang.state = appState.settings.preferredLanguage == "en" ? .on : .off
-        langMenu.addItem(enLang)
+        let current = appState.settings.preferredLanguage
+        for lang in AppLanguages.all {
+            let title = lang.displayName
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(setLanguageFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            // Use `representedObject` to carry the ISO code (or nil for
+            // auto-detect) through AppKit's single-selector action API.
+            item.representedObject = lang.code
+            item.state = (lang.code == current) ? .on : .off
+            langMenu.addItem(item)
+        }
         langItem.submenu = langMenu
         menu.addItem(langItem)
 
@@ -271,6 +277,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         helpItem.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "How to use Sprich")
         helpItem.target = self
         menu.addItem(helpItem)
+
+        // Run onboarding again — useful for users who skipped it or
+        // missed a permission prompt, and for dev testing of the
+        // fresh-install flow without wiping UserDefaults.
+        let onboardItem = NSMenuItem(
+            title: "Run First-Time Setup…",
+            action: #selector(replayOnboarding),
+            keyEquivalent: ""
+        )
+        onboardItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Run first-time setup")
+        onboardItem.target = self
+        menu.addItem(onboardItem)
 
         // Settings
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
@@ -395,19 +413,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    @objc private func setLanguageAuto() {
-        appState.settings.preferredLanguage = nil
+    /// Unified language-switch handler for the menubar submenu.
+    /// `representedObject` is the ISO 639-1 code (e.g. "de"), or `nil` for
+    /// Auto-detect. Checkmarks are refreshed live by `menuWillOpen`.
+    @objc private func setLanguageFromMenu(_ sender: NSMenuItem) {
+        let code = sender.representedObject as? String
+        appState.settings.preferredLanguage = code
         appState.saveSettings()
     }
 
-    @objc private func setLanguageDE() {
-        appState.settings.preferredLanguage = "de"
-        appState.saveSettings()
-    }
-
-    @objc private func setLanguageEN() {
-        appState.settings.preferredLanguage = "en"
-        appState.saveSettings()
+    /// Clear the "onboarded" flag and show the onboarding window again.
+    /// Useful for users who skipped a permission prompt, and for dev
+    /// testing the fresh-install flow without a full `defaults delete`.
+    @objc private func replayOnboarding() {
+        UserDefaults.standard.removeObject(forKey: "sprich.hasCompletedOnboarding")
+        DispatchQueue.main.async { [weak self] in
+            self?.showOnboardingWindow()
+        }
     }
 
     // MARK: - Accessibility diagnostic + restart
@@ -470,16 +492,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     nonisolated func menuWillOpen(_ menu: NSMenu) {
-        // Called just before the status menu appears — refresh the AX indicator.
+        // Called just before the status menu appears. Refresh any items
+        // whose state depends on live app state: accessibility grant,
+        // and the Language submenu checkmarks.
         DispatchQueue.main.async { [weak self] in
-            guard let axItem = menu.item(withTag: 200) else { return }
-            let granted = Permissions.isAccessibilityGranted()
-            if granted {
-                axItem.title = "Accessibility: ✅ Granted"
-            } else {
-                axItem.title = "Accessibility: ❌ Not granted — click to fix"
+            guard let self else { return }
+
+            if let axItem = menu.item(withTag: 200) {
+                let granted = Permissions.isAccessibilityGranted()
+                axItem.title = granted
+                    ? "Accessibility: ✅ Granted"
+                    : "Accessibility: ❌ Not granted — click to fix"
             }
-            _ = self // keep capture valid
+
+            // Sync Language submenu checkmarks to the current preference.
+            // Needed because the user can change language from anywhere —
+            // Settings picker, another menubar open — and we don't want
+            // stale ticks.
+            for item in menu.items {
+                guard let submenu = item.submenu else { continue }
+                let current = self.appState.settings.preferredLanguage
+                for langItem in submenu.items {
+                    let code = langItem.representedObject as? String
+                    langItem.state = (code == current) ? .on : .off
+                }
+            }
         }
     }
 }
