@@ -272,10 +272,13 @@ struct AppSettings: Codable {
             inputMode: .holdToTalk,
             maxRecordingDuration: 300,
             adaptToSurface: true,
-            // Argmax's recommended multilingual model (~626MB Core ML).
-            // Matches large-v3 accuracy used by Groq cloud, so DoD "WER parity
-            // with Groq" is at least structurally plausible.
-            localWhisperModel: "large-v3-v20240930_626MB"
+            // Default is the `_turbo_632MB` variant — same weights as
+            // the plain 626MB model (DoD "WER parity with Groq" still
+            // holds, Groq's whisper-large-v3 shares the same encoder),
+            // but with OpenAI's pruned turbo decoder (8 layers vs 32)
+            // for ~2× faster inference. User can swap to Fast or
+            // Accurate in Settings → Providers → Local.
+            localWhisperModel: WhisperModelCatalog.balanced.variantName
         )
     }
 }
