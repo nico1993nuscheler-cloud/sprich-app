@@ -143,6 +143,21 @@ class PipelineCoordinator {
                 surfaceBlockingError(title: title, body: body)
                 return
             }
+            // Model bytes are on disk, but that's not the same as
+            // "pipe is warmed and ready to transcribe". Core ML
+            // compile + weight load take seconds-to-minutes depending
+            // on hardware and whether the compiled form is cached
+            // yet. Without this guard, a hotkey press during warmup
+            // leads to recording → release → `transcribe()` awaiting
+            // `loadingTask.value` → an indefinitely-stuck overlay
+            // with nothing pasted.
+            if !WhisperModelManager.shared.isPipeReady {
+                surfaceBlockingError(
+                    title: "Sprich is still warming up",
+                    body: "Whisper is loading (first launch after install takes a few minutes; subsequent launches are faster). Try again in a moment — the menubar will show Ready when it's done."
+                )
+                return
+            }
             // Kick off a parallel warm-load so the pipe is ready by the
             // time the user releases the hotkey. If the load is already
             // complete this is cheap (early-return inside `prewarm`).

@@ -303,6 +303,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.menu = menu
         menu.delegate = self
 
+        // Also watch pipe-ready changes so the header flips from
+        // "Loading Whisper…" → "Ready" the moment WhisperKit finishes
+        // warming, without waiting for the next status event.
+        WhisperModelManager.shared.$isPipeReady
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshMenuHeaderForCurrentStatus()
+            }
+            .store(in: &appState.cancellables)
+
         // Observe status to update menu header
         appState.$status
             .receive(on: DispatchQueue.main)
@@ -310,7 +320,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let menuItem = self?.statusItem?.menu?.item(withTag: 100) else { return }
                 switch status {
                 case .ready:
-                    menuItem.title = "Sprich — Ready"
+                    // Differentiate between truly ready and "model
+                    // bytes on disk but pipe still warming" — see
+                    // WhisperModelManager.isPipeReady for the gap.
+                    let provider = self?.appState.settings.sttProvider ?? .groq
+                    if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
+                        menuItem.title = "Sprich — Loading Whisper…"
+                    } else {
+                        menuItem.title = "Sprich — Ready"
+                    }
                 case .recording(let mode):
                     menuItem.title = "Sprich — Recording (\(mode.displayName))..."
                 case .processing:
@@ -426,6 +444,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let code = sender.representedObject as? String
         appState.settings.preferredLanguage = code
         appState.saveSettings()
+    }
+
+    /// Re-derive the menubar header title from the current app+pipe
+    /// state. Called when pipe-ready flips without a status change.
+    private func refreshMenuHeaderForCurrentStatus() {
+        guard let menuItem = statusItem?.menu?.item(withTag: 100) else { return }
+        switch appState.status {
+        case .ready:
+            let provider = appState.settings.sttProvider
+            if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
+                menuItem.title = "Sprich — Loading Whisper…"
+            } else {
+                menuItem.title = "Sprich — Ready"
+            }
+        case .recording(let mode):
+            menuItem.title = "Sprich — Recording (\(mode.displayName))..."
+        case .processing:
+            menuItem.title = "Sprich — Processing..."
+        case .error(let msg):
+            menuItem.title = "Sprich — Error: \(msg)"
+        }
     }
 
     /// Clear the "onboarded" flag and show the onboarding window again.
