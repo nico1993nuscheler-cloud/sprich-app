@@ -1,6 +1,5 @@
 import Foundation
 import AppKit
-import UserNotifications
 
 /// Orchestrates the full dictation pipeline:
 /// Hotkey → Record → STT → (optional LLM Cleanup) → Paste
@@ -70,8 +69,10 @@ class PipelineCoordinator {
         if !Permissions.isMicrophoneGranted() {
             let granted = await Permissions.requestMicrophone()
             if !granted {
-                appState.status = .error("Microphone access denied")
-                showNotification(title: "Sprich", body: "Microphone permission required. Open System Settings.")
+                surfaceBlockingError(
+                    title: "Microphone access denied",
+                    body: "Grant Sprich microphone permission in System Settings → Privacy & Security → Microphone."
+                )
                 return
             }
         }
@@ -91,10 +92,9 @@ class PipelineCoordinator {
         // local (on-device Whisper) needs the model downloaded.
         // Literal mode doesn't need an LLM so we only check STT here.
         //
-        // When a guard fails we surface the problem visibly — the recording
-        // overlay never appears, so silent errors feel like the app broke.
-        // `surfaceBlockingError` posts a Notification Center alert AND an
-        // NSAlert fallback when notifications aren't granted.
+        // When a guard fails the recording overlay never appears, so we
+        // surface the error by pasting it inline where the user was
+        // about to dictate. See `surfaceBlockingError` for the details.
         if provider.isLocal {
             if !WhisperModelManager.shared.state.isReady {
                 surfaceBlockingError(
@@ -138,8 +138,10 @@ class PipelineCoordinator {
                 displayName: appState.settings.displayName(for: mode)
             )
         } catch {
-            appState.status = .error("Recording failed: \(error.localizedDescription)")
-            showNotification(title: "Sprich Error", body: "Failed to start recording: \(error.localizedDescription)")
+            surfaceBlockingError(
+                title: "Recording failed",
+                body: error.localizedDescription
+            )
         }
     }
 
@@ -292,40 +294,31 @@ class PipelineCoordinator {
 
     // MARK: - Error surfacing
 
-    /// Surface a fatal-for-this-dictation error so the user understands
-    /// why their hotkey press produced nothing. Sets `.error` status,
-    /// posts a Notification Center alert, AND — if notifications aren't
-    /// authorised — falls back to an NSAlert so the problem is never
-    /// silent. Menubar icon also flips to a warning symbol via the
-    /// AppState.status observer in AppDelegate.
+    /// Surface a fatal-for-this-dictation error by pasting it inline into
+    /// whatever text field had focus when the user pressed the hotkey.
+    ///
+    /// Rationale: the user just pressed a dictation hotkey, so they're
+    /// already looking at the text field they expected text to land in.
+    /// Pasting the error there puts the diagnostic exactly where their
+    /// attention is, and requires no permission prompt — unlike
+    /// Notification Center (needs authorization) or NSAlert (modal,
+    /// interruptive). Accessibility is already granted (otherwise the
+    /// hotkey itself wouldn't fire), so `TextInserter.insert` works.
+    ///
+    /// The menubar icon also flips to the error state via the
+    /// `appState.status` observer in AppDelegate, and we print to the
+    /// Xcode console in DEBUG so dev debugging stays visible even if the
+    /// paste target swallows text silently.
     private func surfaceBlockingError(title: String, body: String) {
         appState.status = .error(title)
-        showNotification(title: title, body: body)
 
         #if DEBUG
         print("[Sprich] ⛔️ \(title) — \(body)")
         #endif
 
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            guard settings.authorizationStatus != .authorized else { return }
-            // Not granted (or never asked). Notification Center would
-            // silently drop the alert we just queued, so surface an
-            // NSAlert instead — same info, but guaranteed to appear.
-            DispatchQueue.main.async {
-                let alert = NSAlert()
-                alert.messageText = title
-                alert.informativeText = body
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "Open Settings")
-                alert.addButton(withTitle: "Dismiss")
-                NSApp.activate(ignoringOtherApps: true)
-                if alert.runModal() == .alertFirstButtonReturn {
-                    NotificationCenter.default.post(
-                        name: Notification.Name("sprich.requestOpenSettings"),
-                        object: nil
-                    )
-                }
-            }
+        let pasted = "⚠️ Sprich: \(title). \(body)"
+        Task { @MainActor in
+            await TextInserter.insert(pasted)
         }
 
         // Auto-clear the error status after 3 s so the menubar icon
@@ -335,20 +328,5 @@ class PipelineCoordinator {
                 self?.appState.status = .ready
             }
         }
-    }
-
-    private func showNotification(title: String, body: String) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
-
-        UNUserNotificationCenter.current().add(request)
     }
 }

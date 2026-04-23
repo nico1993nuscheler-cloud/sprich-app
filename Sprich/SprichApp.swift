@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UserNotifications
 
 extension Notification.Name {
     static let sprichOnboardingComplete = Notification.Name("sprich.onboardingComplete")
@@ -72,26 +71,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Local selected AND the model is already downloaded. We never
         // auto-download on launch — the ~626 MB is opt-in in Settings.
         prewarmLocalWhisperIfReady()
-
-        // Ask once for Notification Center permission so error notifications
-        // actually surface. Without this, `UNUserNotificationCenter.add(_:)`
-        // silently drops everything and pipeline errors become invisible.
-        // Called lazily — macOS returns immediately if the user has already
-        // responded, so this is safe to run on every launch.
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
-            // We ignore the result here. `PipelineCoordinator` falls back
-            // to an NSAlert for fatal errors when notifications aren't
-            // granted, so a "no" answer doesn't leave the user in the dark.
-        }
-
-        // Handle "Open Settings" from `PipelineCoordinator`'s error alerts.
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("sprich.requestOpenSettings"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.openSettings()
-        }
     }
 
     /// Kick off Core ML load of the local Whisper pipe in the background,
