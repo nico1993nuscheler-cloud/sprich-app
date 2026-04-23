@@ -28,6 +28,24 @@ enum KeychainManager {
     }
 
     /// Retrieve a value from the Keychain.
+    ///
+    /// The real "no prompt on install" behavior (182a558) is that
+    /// we never `retrieve()` an item the app didn't `store()` itself,
+    /// so on a fresh install there's nothing to prompt about.
+    ///
+    /// `kSecUseAuthenticationUI = .fail` is a safety net on top of
+    /// that: if a Sprich keychain item exists but can only be read
+    /// by a different code-signing identity (e.g. stale items left
+    /// over from a prior ad-hoc `xcodebuild` in dev, or a future
+    /// re-signing with a proper Developer ID), return nil silently
+    /// instead of surfacing the ACL "Always Allow / Deny" dialog.
+    /// The app then routes the user back into Settings, and
+    /// `store()` rewrites the item under the current signature.
+    ///
+    /// The proper cross-signature solution is the Data Protection
+    /// Keychain (tried in 535d9bd, reverted in 182a558) — it requires
+    /// the keychain-access-groups entitlement, which needs a paid
+    /// Apple Developer ID (P1-INF-01).
     static func retrieve(key: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -35,6 +53,7 @@ enum KeychainManager {
             kSecAttrAccount as String: key,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
 
         var result: AnyObject?
@@ -43,6 +62,8 @@ enum KeychainManager {
         guard status == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
+            // errSecInteractionNotAllowed (-25308) = item exists but its
+            // ACL would require UI. Treated identically to "not found".
             return nil
         }
 
