@@ -21,6 +21,7 @@ actor LocalWhisperService {
     enum LocalWhisperError: Error, LocalizedError {
         case modelNotReady
         case emptyTranscription
+        case timedOut(TimeInterval)
 
         var errorDescription: String? {
             switch self {
@@ -28,9 +29,19 @@ actor LocalWhisperService {
                 return "Local Whisper model is not downloaded yet. Open Settings → Speech to Text → Local to download."
             case .emptyTranscription:
                 return "Local Whisper returned no text."
+            case .timedOut(let seconds):
+                return "Local Whisper timed out after \(Int(seconds))s. Try again, or pick a smaller model tier in Settings → Providers → Local."
             }
         }
     }
+
+    /// Upper bound on a single `WhisperKit.transcribe` call. 180 s is
+    /// well above any realistic clip (5-minute max recording × ~0.5×
+    /// realtime worst case on M1 8GB ≈ 150 s for a full-duration clip
+    /// through large-v3). If we hit it, something's genuinely stuck
+    /// and we should free the UI rather than hang forever behind the
+    /// recording overlay.
+    private static let transcribeTimeout: TimeInterval = 180
 
     /// Warm the WhisperKit pipe for `model`. Safe to call repeatedly from
     /// any actor — overlapping calls dedupe onto the same load task.
@@ -87,7 +98,19 @@ actor LocalWhisperService {
             throw LocalWhisperError.modelNotReady
         }
 
+        #if DEBUG
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let audioKB = audioData.count / 1024
+        print("[Sprich][Local] transcribe start — \(audioKB)KB audio, lang=\(language ?? "auto")")
+        #endif
+
         let samples = try PCMConverter.float16kHzMono(from: audioData)
+
+        #if DEBUG
+        let t1 = CFAbsoluteTimeGetCurrent()
+        let audioSeconds = Double(samples.count) / 16_000.0
+        print("[Sprich][Local] PCM convert: \(Int((t1 - t0) * 1000))ms, audio duration=\(String(format: "%.1f", audioSeconds))s")
+        #endif
 
         // Aggressive latency-first decoding options. WhisperKit's defaults
         // are tuned for transcription quality on long-form audio with a
@@ -140,10 +163,33 @@ actor LocalWhisperService {
             chunkingStrategy: .vad
         )
 
-        let results: [TranscriptionResult] = try await pipe.transcribe(
-            audioArray: samples,
-            decodeOptions: options
-        )
+        // Wrap the transcribe call in a timeout so a hung WhisperKit
+        // doesn't strand the user behind a stuck recording overlay.
+        // The overlay dismisses on any thrown error, so a timeout
+        // surface-reports the problem and frees the UI.
+        let timeout = Self.transcribeTimeout
+        let results: [TranscriptionResult] = try await withThrowingTaskGroup(
+            of: [TranscriptionResult].self
+        ) { group in
+            group.addTask {
+                try await pipe.transcribe(audioArray: samples, decodeOptions: options)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw LocalWhisperError.timedOut(timeout)
+            }
+            // First task to finish wins; cancel the loser.
+            guard let first = try await group.next() else {
+                throw LocalWhisperError.timedOut(timeout)
+            }
+            group.cancelAll()
+            return first
+        }
+
+        #if DEBUG
+        let t2 = CFAbsoluteTimeGetCurrent()
+        print("[Sprich][Local] decode: \(Int((t2 - t1) * 1000))ms, windows=\(results.count)")
+        #endif
 
         let joined = results
             .map { $0.text }

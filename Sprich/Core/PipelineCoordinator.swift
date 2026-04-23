@@ -79,6 +79,16 @@ class PipelineCoordinator {
                 RecordingOverlayController.shared.updateAudioLevel(level)
             }
         }
+
+        // When the recording hits the user's configured time cap mid-flight,
+        // process the captured audio through the normal pipeline instead
+        // of dropping it. Nothing-is-lost from the user's perspective,
+        // and a follow-up notice tells them to hotkey-again to continue.
+        recorder.onMaxDurationReached = { [weak self] wav in
+            Task { @MainActor in
+                await self?.processAutoStoppedAudio(wav)
+            }
+        }
     }
 
     /// Toggle recording for a specific mode (used in toggle input mode).
@@ -170,6 +180,109 @@ class PipelineCoordinator {
                 body: error.localizedDescription
             )
         }
+    }
+
+    /// Handle audio that AudioRecorder auto-stopped after hitting the
+    /// `maxRecordingDuration` cap. We run it through the full pipeline
+    /// (so the user's N minutes of speech aren't wasted) and append a
+    /// short "continue with hotkey" notice so they know they hit the
+    /// cap and what to do. Mode is whatever was in flight when the
+    /// cap tripped.
+    func processAutoStoppedAudio(_ audioData: Data) async {
+        guard let mode = currentMode else { return }
+        // Flip UI to processing so the overlay shows the spinner for
+        // the STT+LLM leg — exact same visual as a hotkey release.
+        appState.status = .processing
+        RecordingOverlayController.shared.showProcessing()
+
+        do {
+            let finalText = try await runPipeline(audioData: audioData, mode: mode)
+            // Append the "keep going" hint inline so it lands in the
+            // same text field as the transcription. New line + hint
+            // keeps it readable without a huge visual thump.
+            let capSeconds = appState.settings.maxRecordingDuration
+            let continuation = "\n\n[Sprich: recording reached the \(capSeconds)-second limit — press the hotkey again to continue.]"
+            await TextInserter.insert(finalText + continuation)
+        } catch {
+            #if DEBUG
+            print("[Sprich] ❌ Auto-stop pipeline error: \(error)")
+            #endif
+            surfaceBlockingError(
+                title: "Recording auto-stopped at the time limit, but transcription failed",
+                body: (error as? SprichError)?.userFacingMessage ?? error.localizedDescription
+            )
+        }
+
+        RecordingOverlayController.shared.dismiss()
+        appState.status = .ready
+        currentMode = nil
+        activeProvider = nil
+    }
+
+    /// The STT→glossary→(LLM or local polish) path, factored out of
+    /// `stopAndProcess` so auto-stopped recordings can share it. Returns
+    /// the final cleaned text ready for paste. Does NOT paste — the
+    /// caller decides whether to paste the raw result or append a hint.
+    private func runPipeline(
+        audioData: Data,
+        mode: TranscriptionMode
+    ) async throws -> String {
+        let t0 = CFAbsoluteTimeGetCurrent()
+
+        let whisperPrompt = TextPostProcessor.whisperBiasPrompt(
+            glossaryTerms: appState.settings.glossaryTerms,
+            includePunctuationHint: (mode == .literal)
+        )
+
+        // Surface resolution only for Formal+adaptToSurface. Kicked in
+        // parallel so it overlaps with STT round-trip rather than
+        // serializing behind it.
+        let bundleIDSnapshot = capturedBundleID
+        let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
+        let surfaceTask: Task<Surface, Never>? = shouldResolveSurface
+            ? Task.detached(priority: .userInitiated) {
+                await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+            }
+            : nil
+
+        let provider = activeProvider ?? appState.settings.sttProvider
+        let rawTranscript = try await sttService.transcribe(
+            audioData: audioData,
+            provider: provider,
+            language: appState.settings.preferredLanguage,
+            prompt: whisperPrompt
+        )
+
+        #if DEBUG
+        let t1 = CFAbsoluteTimeGetCurrent()
+        print("[Sprich] STT: \(Int((t1 - t0) * 1000))ms \(InputSanitizer.redactForLog(rawTranscript))")
+        #endif
+
+        let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let corrected = TextPostProcessor.applyGlossary(
+            rawTranscript,
+            replacements: appState.settings.glossaryReplacements
+        )
+
+        if mode == .literal {
+            return TextPostProcessor.polishLiteral(corrected)
+        }
+
+        RecordingOverlayController.shared.showTranscribedText(corrected)
+        let surface = await surfaceTask?.value ?? .generic
+        let finalText = try await llmService.cleanup(
+            rawText: corrected,
+            mode: mode,
+            settings: appState.settings,
+            surface: surface
+        )
+        #if DEBUG
+        let t2 = CFAbsoluteTimeGetCurrent()
+        print("[Sprich] LLM: \(Int((t2 - t1) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
+        #endif
+        return finalText
     }
 
     /// Stop recording and process through the pipeline.

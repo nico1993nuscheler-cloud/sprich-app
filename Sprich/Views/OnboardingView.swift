@@ -271,14 +271,14 @@ struct OnboardingView: View {
             // explicitly calls out why someone would open it.
             DisclosureGroup(isExpanded: $cloudDisclosureExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("A cloud provider key unlocks two things at once: faster, more polished transcription (Groq Whisper ≈ 0.5 s round-trip) AND the AI-powered cleanup used in Formal and Custom modes. Without a cloud key, only Literal mode works.")
+                    Text("A cloud provider key unlocks two things at once: faster, more polished transcription (Groq Whisper ≈ 0.5 s round-trip) AND the AI-powered cleanup used in Formal and Custom modes. The Groq free tier is generous — typical personal use fits comfortably inside it.")
                         .font(.caption).foregroundColor(.secondary)
 
                     providerOptionCard(
                         choice: .groq,
                         icon: "bolt.fill",
                         title: "Cloud — Groq (recommended)",
-                        badge: "Free tier · ≈ €0.0007/min after · powers STT + Formal cleanup",
+                        badge: "Free tier · typical personal use is free · powers STT + Formal cleanup",
                         description: "Sends audio to Groq's API for transcription. Same key drives the Formal-mode AI polish, so one key gets you everything."
                     )
 
@@ -307,14 +307,17 @@ struct OnboardingView: View {
                     .font(.system(size: 13, weight: .medium))
             }
 
-            // Heads-up for users who pick Local without adding any cloud
-            // key: Formal/Custom modes call an LLM, and the LLM path is
-            // always cloud. Literal is purely local.
+            // Heads-up only fires when the user has Local selected AND
+            // no cloud LLM key anywhere in Keychain — i.e. the exact
+            // configuration where Formal/Custom would actually fail.
+            // Users who already added a Groq key in a prior install
+            // keep Formal/Custom working with Local STT, so we stay
+            // silent for them.
             if providerChoice == .local && !hasAnyCloudLLMKey {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "info.circle.fill")
                         .foregroundColor(.accentColor)
-                    Text("Local covers transcription (Literal mode). Formal and Custom modes still need a cloud LLM key — expand the section above, or add one later in Settings → API Keys.")
+                    Text("Local handles transcription. Formal and Custom modes use cloud AI cleanup — add a cloud LLM key above (or later in Settings → API Keys) to enable them. Literal mode works fully offline.")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 .padding(10)
