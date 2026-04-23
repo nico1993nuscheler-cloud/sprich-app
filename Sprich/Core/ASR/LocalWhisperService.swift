@@ -20,14 +20,11 @@ actor LocalWhisperService {
 
     enum LocalWhisperError: Error, LocalizedError {
         case modelNotReady
-        case emptyTranscription
 
         var errorDescription: String? {
             switch self {
             case .modelNotReady:
                 return "Local Whisper model is not downloaded yet. Open Settings → Speech to Text → Local to download."
-            case .emptyTranscription:
-                return "Local Whisper returned no text."
             }
         }
     }
@@ -238,15 +235,21 @@ actor LocalWhisperService {
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if joined.isEmpty {
-            #if DEBUG
-            print("[Sprich][Local] transcribe: joined result is empty — throwing emptyTranscription")
-            #endif
-            throw LocalWhisperError.emptyTranscription
-        }
-
+        // Empty result is NOT an error — it just means no speech was
+        // detected (user pressed hotkey, said nothing, released). The
+        // cloud providers return empty string in the same situation;
+        // `PipelineCoordinator.stopAndProcess` checks for that and
+        // silently dismisses the overlay with `status = .ready`, no
+        // error banner, no alarming paste. Throwing here would have
+        // surfaced a user-visible "Sprich Error. Local Whisper
+        // returned no text." which is harsh for what's effectively
+        // a no-op.
         #if DEBUG
-        print("[Sprich][Local] transcribe ✅ returning \(joined.count) chars")
+        if joined.isEmpty {
+            print("[Sprich][Local] transcribe: empty result (no speech) — returning \"\"")
+        } else {
+            print("[Sprich][Local] transcribe ✅ returning \(joined.count) chars")
+        }
         #endif
         return joined
     }
