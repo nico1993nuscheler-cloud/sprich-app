@@ -17,6 +17,25 @@ class PipelineCoordinator {
     /// Bundle ID of the frontmost app captured at hotkey-press time.
     /// Used later to resolve the destination `Surface` for Formal mode.
     private var capturedBundleID: String?
+    /// Provider resolved at hotkey-press time. May differ from the
+    /// user's configured choice when we auto-fall-back to Local while
+    /// offline. Stashed so `stopAndProcess` uses the same provider
+    /// that `startRecording` committed to.
+    private var activeProvider: STTProviderType?
+
+    /// Decide which provider to use for a new dictation. Returns the
+    /// user's configured choice unless:
+    /// (a) that choice is a cloud provider, (b) there's no usable
+    /// network path, and (c) the local model is already downloaded.
+    /// In that case we transparently use `.local` for this dictation
+    /// only — settings are not mutated.
+    private func effectiveProviderForThisDictation() -> STTProviderType {
+        let configured = appState.settings.sttProvider
+        if configured.isLocal { return configured }
+        guard !NetworkReachability.shared.isReachable else { return configured }
+        guard WhisperModelManager.shared.state.isReady else { return configured }
+        return .local
+    }
 
     init(appState: AppState) {
         self.appState = appState
@@ -56,10 +75,20 @@ class PipelineCoordinator {
             }
         }
 
+        // Resolve the provider we'll actually use for this dictation.
+        // Auto-fallback to .local if the user's cloud choice is unreachable
+        // AND a local model is ready on disk. This is session-only — the
+        // user's saved preference is untouched.
+        let provider = effectiveProviderForThisDictation()
+        #if DEBUG
+        if provider != appState.settings.sttProvider {
+            print("[Sprich] Network offline — falling back to \(provider.displayName) for this dictation")
+        }
+        #endif
+
         // STT readiness check: cloud providers need an API key;
         // local (on-device Whisper) needs the model downloaded.
         // Literal mode doesn't need an LLM so we only check STT here.
-        let provider = appState.settings.sttProvider
         if provider.isLocal {
             if !WhisperModelManager.shared.state.isReady {
                 appState.status = .error("Local Whisper model not downloaded")
@@ -69,11 +98,21 @@ class PipelineCoordinator {
                 )
                 return
             }
+            // Kick off a parallel warm-load so the pipe is ready by the
+            // time the user releases the hotkey. If the load is already
+            // complete this is cheap (early-return inside `prewarm`).
+            TranscriptionService.prewarmLocalWhisperIfReady(
+                model: appState.settings.localWhisperModel
+            )
         } else if KeychainManager.retrieve(key: provider.keychainKey) == nil {
             appState.status = .error("STT API key not configured")
             showNotification(title: "Sprich", body: "Please configure your STT API key in Settings.")
             return
         }
+
+        // Stash the resolved provider so stopAndProcess uses the same
+        // one — reachability can flip between start and stop.
+        activeProvider = provider
 
         do {
             currentMode = mode
@@ -137,10 +176,13 @@ class PipelineCoordinator {
                 }
                 : nil
 
-            // 4. Transcribe via STT
+            // 4. Transcribe via STT. Use the provider resolved at
+            // startRecording time — the user may have been offline
+            // then and we already committed to that fallback.
+            let provider = activeProvider ?? appState.settings.sttProvider
             let rawTranscript = try await sttService.transcribe(
                 audioData: audioData,
-                provider: appState.settings.sttProvider,
+                provider: provider,
                 language: appState.settings.preferredLanguage,
                 prompt: whisperPrompt
             )
@@ -216,6 +258,12 @@ class PipelineCoordinator {
             } else {
                 errorMessage = error.localizedDescription
             }
+
+            #if DEBUG
+            // Also log to Xcode console so dev debugging doesn't depend
+            // on Notification Center permission being granted.
+            print("[Sprich] ❌ Pipeline error: \(errorMessage) — raw: \(error)")
+            #endif
 
             showNotification(title: "Sprich Error", body: errorMessage)
 

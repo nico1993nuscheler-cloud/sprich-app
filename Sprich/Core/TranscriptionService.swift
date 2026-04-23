@@ -21,6 +21,35 @@ class TranscriptionService {
     /// time), so we keep one instance for the lifetime of the process.
     static let localWhisper = LocalWhisperService()
 
+    /// Kick off a background warm-load of the local Whisper pipe for
+    /// `model` if the model is already downloaded. No-op if the model
+    /// is missing. Safe to call repeatedly — `LocalWhisperService`
+    /// dedupes overlapping loads onto a single task.
+    ///
+    /// Called from: app launch, provider switch to `.local`, download
+    /// completion, and as a defensive kick at hotkey-press time. That
+    /// way by the time the user releases the hotkey, the pipe is
+    /// usually warm — and if not, `transcribe` awaits the in-flight
+    /// load instead of failing.
+    @MainActor
+    static func prewarmLocalWhisperIfReady(model: String) {
+        let manager = WhisperModelManager.shared
+        manager.refreshState(for: model)
+        guard let folder = manager.existingFolder(for: model) else { return }
+        Task.detached(priority: .userInitiated) {
+            do {
+                try await Self.localWhisper.prewarm(model: model, modelFolder: folder)
+                #if DEBUG
+                print("[Sprich] Local Whisper warm (\(model))")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Sprich] Local Whisper warm failed: \(error)")
+                #endif
+            }
+        }
+    }
+
     /// Transcribe audio data using the configured STT provider.
     func transcribe(
         audioData: Data,
