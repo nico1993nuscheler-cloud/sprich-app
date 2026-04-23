@@ -89,18 +89,47 @@ actor LocalWhisperService {
 
         let samples = try PCMConverter.float16kHzMono(from: audioData)
 
-        // DecodingOptions init order is fixed — see Configurations.swift in
-        // WhisperKit v0.18: verbose, task, language, temperature, ..., then
-        // detectLanguage, skipSpecialTokens, withoutTimestamps.
+        // Aggressive latency-first decoding options. WhisperKit's defaults
+        // are tuned for transcription quality on long-form audio with a
+        // temperature-fallback ladder (retry at higher temperature when
+        // compression-ratio or logprob thresholds trip). For interactive
+        // dictation that ladder is a wall-clock tax we don't need —
+        // single-pass greedy decoding produces nearly identical output
+        // on clean short clips and is measurably faster. Concrete
+        // levers below:
+        //
+        // - `temperature: 0.0` + `temperatureFallbackCount: 0`: do one
+        //   deterministic pass, never retry. Saves up to 5× decode
+        //   time on any clip where a heuristic threshold would have
+        //   triggered a fallback.
+        // - `topK: 1`: greedy token sampling. Slightly cheaper per token
+        //   than top-5, and there's no stochasticity we want at
+        //   temperature 0 anyway.
+        // - `compressionRatioThreshold: nil`, `logProbThreshold: nil`,
+        //   `noSpeechThreshold: nil`: disable the quality gates that
+        //   drive the fallback ladder. They also add per-window overhead.
+        // - `withoutTimestamps: true`: skip timestamp-token generation
+        //   (we only paste text, no timeline).
+        // - `skipSpecialTokens: true`: drop `<|endoftext|>` etc. from
+        //   emitted string — already true upstream but set explicitly.
+        // - `usePrefillPrompt: true` + `usePrefillCache: true`: reuse
+        //   the cached `<|startoftranscript|><|language|><|transcribe|>`
+        //   prefix across chunks (WhisperKit defaults, kept explicit).
         let options = DecodingOptions(
             verbose: false,
             task: .transcribe,
             language: language,
             temperature: 0.0,
+            temperatureFallbackCount: 0,
+            topK: 1,
             usePrefillPrompt: true,
+            usePrefillCache: true,
             detectLanguage: language == nil,
             skipSpecialTokens: true,
-            withoutTimestamps: true
+            withoutTimestamps: true,
+            compressionRatioThreshold: nil,
+            logProbThreshold: nil,
+            noSpeechThreshold: nil
         )
 
         let results: [TranscriptionResult] = try await pipe.transcribe(

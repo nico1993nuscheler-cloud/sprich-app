@@ -110,7 +110,10 @@ struct ModelDownloadView: View {
         case .failed:
             return "Download failed"
         default:
-            return "~626 MB one-time download"
+            if let option = WhisperModelCatalog.option(for: model) {
+                return "~\(option.approxSizeMB) MB one-time download"
+            }
+            return "One-time download"
         }
     }
 

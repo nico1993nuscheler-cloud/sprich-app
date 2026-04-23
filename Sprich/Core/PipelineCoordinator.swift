@@ -37,6 +37,35 @@ class PipelineCoordinator {
         return .local
     }
 
+    /// Build a state-aware message for when Local is the chosen provider
+    /// but the model isn't ready. The three interesting cases produce
+    /// different guidance — "still downloading" is nothing the user
+    /// needs to act on, whereas "not downloaded" is.
+    private func localModelNotReadyMessage() -> (String, String) {
+        switch WhisperModelManager.shared.state {
+        case .downloading(let p):
+            return (
+                "Local Whisper is still downloading",
+                "Progress: \(Int(p * 100))%. Hotkeys will work as soon as it finishes. You can keep working — this runs in the background."
+            )
+        case .preparing:
+            return (
+                "Local Whisper is finalising",
+                "One-time Core ML compile (usually 10–30 seconds). Try your hotkey again in a moment."
+            )
+        case .failed(let reason):
+            return (
+                "Local Whisper download failed",
+                "\(reason) — open Sprich Settings → Providers → Local and click Download to retry."
+            )
+        default:
+            return (
+                "Local Whisper model not downloaded",
+                "Open Sprich Settings → Providers → Local to download. Local is your default — Sprich will not silently switch to a cloud provider."
+            )
+        }
+    }
+
     init(appState: AppState) {
         self.appState = appState
         // Honor user-configured safety cap.
@@ -97,10 +126,8 @@ class PipelineCoordinator {
         // about to dictate. See `surfaceBlockingError` for the details.
         if provider.isLocal {
             if !WhisperModelManager.shared.state.isReady {
-                surfaceBlockingError(
-                    title: "Local Whisper model not downloaded",
-                    body: "Open Sprich Settings → Providers → Local to download the ~626 MB model. Local is your default — Sprich will not silently switch to a cloud provider."
-                )
+                let (title, body) = localModelNotReadyMessage()
+                surfaceBlockingError(title: title, body: body)
                 return
             }
             // Kick off a parallel warm-load so the pipe is ready by the
