@@ -365,11 +365,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkeys() {
         hotkeyManager = HotkeyManager { [weak self] mode in
             guard let self = self else { return }
+            #if DEBUG
+            print("[Sprich][Hotkey] ACTIVATE \(mode.displayName)")
+            #endif
             Task { @MainActor in
                 await self.pipeline.toggle(mode: mode)
             }
         } onRelease: { [weak self] in
             guard let self = self else { return }
+            #if DEBUG
+            print("[Sprich][Hotkey] RELEASE → calling stopAndProcess")
+            #endif
             Task { @MainActor in
                 await self.pipeline.stopAndProcess()
             }
