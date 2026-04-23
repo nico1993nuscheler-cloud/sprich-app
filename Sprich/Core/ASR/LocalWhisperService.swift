@@ -12,6 +12,11 @@ actor LocalWhisperService {
 
     private var pipe: WhisperKit?
     private var loadedModel: String?
+    /// In-flight load. Held so (a) repeat `prewarm` calls dedupe to one
+    /// WhisperKit construction and (b) `transcribe` can await an ongoing
+    /// load instead of failing with `.modelNotReady` when the user triggers
+    /// dictation mid-load (e.g. hotkey pressed right after selecting Local).
+    private var loadingTask: Task<Void, Error>?
 
     enum LocalWhisperError: Error, LocalizedError {
         case modelNotReady
@@ -27,8 +32,8 @@ actor LocalWhisperService {
         }
     }
 
-    /// Warm the WhisperKit pipe for `model`. Safe to call repeatedly; only
-    /// the first call pays the load + Core ML compile cost.
+    /// Warm the WhisperKit pipe for `model`. Safe to call repeatedly from
+    /// any actor — overlapping calls dedupe onto the same load task.
     ///
     /// `modelFolder` must exist on disk — `WhisperModelManager.ensureReady`
     /// is responsible for downloading it. We set `download: false` so an
@@ -37,18 +42,31 @@ actor LocalWhisperService {
         if let pipe, loadedModel == model, case .loaded = pipe.modelState {
             return
         }
+        if let existing = loadingTask {
+            try await existing.value
+            return
+        }
 
-        let config = WhisperKitConfig(
-            model: model,
-            modelFolder: modelFolder.path,
-            verbose: false,
-            logLevel: .error,
-            prewarm: true,
-            load: true,
-            download: false
-        )
-        let loaded = try await WhisperKit(config)
-        self.pipe = loaded
+        let task = Task<Void, Error> { [modelFolder] in
+            let config = WhisperKitConfig(
+                model: model,
+                modelFolder: modelFolder.path,
+                verbose: false,
+                logLevel: .error,
+                prewarm: true,
+                load: true,
+                download: false
+            )
+            let loaded = try await WhisperKit(config)
+            await self.setPipe(loaded, model: model)
+        }
+        loadingTask = task
+        defer { loadingTask = nil }
+        try await task.value
+    }
+
+    private func setPipe(_ pipe: WhisperKit, model: String) {
+        self.pipe = pipe
         self.loadedModel = model
     }
 
@@ -60,6 +78,11 @@ actor LocalWhisperService {
         audioData: Data,
         language: String?
     ) async throws -> String {
+        // If a prewarm is mid-flight (user just switched to Local and
+        // pressed the hotkey), wait for it rather than failing.
+        if pipe == nil, let loading = loadingTask {
+            try await loading.value
+        }
         guard let pipe else {
             throw LocalWhisperError.modelNotReady
         }

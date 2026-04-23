@@ -75,27 +75,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Kick off Core ML load of the local Whisper pipe in the background,
     /// so the first hotkey press doesn't pay the 10-30 s load cost.
+    /// Only fires when Local is already the active provider — switching
+    /// to Local mid-session triggers its own prewarm from SettingsView.
     private func prewarmLocalWhisperIfReady() {
         guard appState.settings.sttProvider.isLocal else { return }
-        let model = appState.settings.localWhisperModel
-        let manager = WhisperModelManager.shared
-        manager.refreshState(for: model)
-        guard let folder = manager.existingFolder(for: model) else { return }
-        Task.detached(priority: .utility) {
-            do {
-                try await TranscriptionService.localWhisper.prewarm(
-                    model: model,
-                    modelFolder: folder
-                )
-                #if DEBUG
-                print("[Sprich] Local Whisper prewarmed (\(model))")
-                #endif
-            } catch {
-                #if DEBUG
-                print("[Sprich] Local Whisper prewarm failed: \(error)")
-                #endif
-            }
-        }
+        TranscriptionService.prewarmLocalWhisperIfReady(
+            model: appState.settings.localWhisperModel
+        )
     }
 
     private func handleOnboardingComplete() {

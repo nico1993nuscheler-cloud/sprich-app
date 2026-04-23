@@ -34,6 +34,7 @@
 		A10000025 /* PCMConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000028; };
 		A10000026 /* ModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000029; };
 		A10000027 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = H10000001 /* WhisperKit */; };
+		A10000028 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +67,7 @@
 		B10000027 /* LocalWhisperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalWhisperService.swift; sourceTree = "<group>"; };
 		B10000028 /* PCMConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConverter.swift; sourceTree = "<group>"; };
 		B10000029 /* ModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadView.swift; sourceTree = "<group>"; };
+		B10000030 /* NetworkReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkReachability.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -116,6 +118,7 @@
 				B10000009 /* SprichError.swift */,
 				B10000022 /* TextPostProcessor.swift */,
 				B10000025 /* SurfaceDetector.swift */,
+				B10000030 /* NetworkReachability.swift */,
 				D10000009 /* ASR */,
 			);
 			path = Core;
@@ -271,6 +274,7 @@
 				A10000024 /* LocalWhisperService.swift in Sources */,
 				A10000025 /* PCMConverter.swift in Sources */,
 				A10000026 /* ModelDownloadView.swift in Sources */,
+				A10000028 /* NetworkReachability.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

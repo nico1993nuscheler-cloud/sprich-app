@@ -50,7 +50,16 @@ struct SettingsView: View {
         .sheet(isPresented: $showModelDownload) {
             ModelDownloadView(
                 model: appState.settings.localWhisperModel,
-                onDone: { showModelDownload = false },
+                onDone: {
+                    showModelDownload = false
+                    // Download just finished — warm the pipe in the
+                    // background so the first dictation after this
+                    // doesn't pay the ~10-30 s Core ML first-compile
+                    // cost on the hotkey's release path.
+                    TranscriptionService.prewarmLocalWhisperIfReady(
+                        model: appState.settings.localWhisperModel
+                    )
+                },
                 onCancel: {
                     showModelDownload = false
                     // If the user abandons the download, flip the provider
@@ -70,44 +79,98 @@ struct SettingsView: View {
     private var localWhisperStatus: some View {
         let modelName = appState.settings.localWhisperModel
 
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: statusIconName)
-                .foregroundStyle(statusIconColor)
-                .font(.system(size: 16))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: statusIconName)
+                    .foregroundStyle(statusIconColor)
+                    .font(.system(size: 16))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(modelName)
-                    .font(.system(.caption, design: .monospaced))
-                Text(statusSubline)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(modelName)
+                        .font(.system(.caption, design: .monospaced))
+                    Text(statusSubline)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                switch whisperManager.state {
+                case .ready:
+                    Button("Delete") {
+                        try? whisperManager.deleteModel(modelName)
+                    }
+                    .controlSize(.small)
+                case .downloading:
+                    Button("Cancel") { whisperManager.cancelDownload() }
+                        .controlSize(.small)
+                case .preparing:
+                    ProgressView().controlSize(.small)
+                default:
+                    Button("Download") { showModelDownload = true }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                }
             }
 
-            Spacer()
-
-            switch whisperManager.state {
-            case .ready:
-                Button("Delete") {
-                    try? whisperManager.deleteModel(modelName)
+            // Explicit warning when the user has picked Local but the
+            // model isn't downloaded yet — a green-checkmark UI led the
+            // previous tester to think they were good to go and the
+            // first hotkey silently failed.
+            if shouldShowMissingModelWarning {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Local dictation won't work until the model is downloaded.")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Click Download above. ~626 MB, one-time. Sprich will fall back to Groq when online if you haven't downloaded yet.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
                 }
-                .controlSize(.small)
-            case .downloading:
-                Button("Cancel") { whisperManager.cancelDownload() }
-                    .controlSize(.small)
-            case .preparing:
-                ProgressView().controlSize(.small)
-            default:
-                Button("Download") { showModelDownload = true }
-                    .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.orange.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5)
+                )
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.08))
+                .fill(localStatusBackground)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(localStatusBorder, lineWidth: 0.5)
+        )
+    }
+
+    /// Warning background when the user's staring at a non-functional
+    /// Local provider selection; neutral otherwise.
+    private var localStatusBackground: Color {
+        shouldShowMissingModelWarning
+            ? Color.orange.opacity(0.06)
+            : Color.secondary.opacity(0.08)
+    }
+
+    private var localStatusBorder: Color {
+        shouldShowMissingModelWarning
+            ? Color.orange.opacity(0.3)
+            : Color.clear
+    }
+
+    private var shouldShowMissingModelWarning: Bool {
+        switch whisperManager.state {
+        case .ready, .downloading, .preparing: return false
+        case .absent, .unknown, .failed: return true
+        }
     }
 
     private var statusIconName: String {
@@ -116,14 +179,14 @@ struct SettingsView: View {
         case .downloading: return "arrow.down.circle"
         case .preparing: return "gearshape.2"
         case .failed: return "exclamationmark.triangle.fill"
-        case .absent, .unknown: return "arrow.down.circle.dotted"
+        case .absent, .unknown: return "exclamationmark.triangle.fill"
         }
     }
 
     private var statusIconColor: Color {
         switch whisperManager.state {
         case .ready: return .green
-        case .failed: return .red
+        case .failed, .absent, .unknown: return .orange
         default: return .secondary
         }
     }
@@ -140,7 +203,7 @@ struct SettingsView: View {
         case .failed(let msg):
             return msg
         case .absent, .unknown:
-            return "Not downloaded"
+            return "Not downloaded — dictation will not work"
         }
     }
 
@@ -307,6 +370,20 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
+                    .onChange(of: appState.settings.sttProvider) { _, newValue in
+                        // Keep the reachability read current so the warning
+                        // banner reflects disk state, not a stale cache.
+                        whisperManager.refreshState(
+                            for: appState.settings.localWhisperModel
+                        )
+                        guard newValue.isLocal else { return }
+                        // Warm the pipe in the background if the model is
+                        // already on disk — makes the first dictation after
+                        // provider switch fast instead of 10-30 s slow.
+                        TranscriptionService.prewarmLocalWhisperIfReady(
+                            model: appState.settings.localWhisperModel
+                        )
+                    }
                     providerDescription(for: appState.settings.sttProvider)
 
                     if appState.settings.sttProvider.isLocal {
