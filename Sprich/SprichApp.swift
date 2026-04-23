@@ -28,14 +28,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide from dock (belt + suspenders with LSUIElement)
         NSApp.setActivationPolicy(.accessory)
 
-        // Security: purge any legacy URLCache that may contain transcripts or
-        // keys from previous builds (pre-ephemeral-session fix).
+        // Security: purge any legacy URLCache that may contain transcripts
+        // or API keys from pre-ephemeral-session builds. `URLCache.shared`
+        // is only touched by code that uses `URLSession.shared`; all our
+        // URLSessions are ephemeral + no-cache, so this is belt-and-
+        // suspenders — but cheap and right to do.
         URLCache.shared.removeAllCachedResponses()
-        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-           let bundleID = Bundle.main.bundleIdentifier {
-            let bundleCache = caches.appendingPathComponent(bundleID, isDirectory: true)
-            try? FileManager.default.removeItem(at: bundleCache)
-        }
+
+        // IMPORTANT: we used to ALSO `removeItem(at: <Caches>/<bundleID>)`
+        // to force-delete any legacy on-disk URL cache. That was disastrous:
+        // Core ML stores its compiled-model cache under that same bundle
+        // cache directory, so nuking the whole folder every launch caused
+        // WhisperKit to recompile the 500 MB-class audio encoder from
+        // scratch every single launch (the ~500 s "pre-warm" cost Nico
+        // was hitting). SQLite even spammed `BUG IN CLIENT OF libsqlite3`
+        // errors in Console because Core ML's `.db` was yanked out mid-use.
+        //
+        // The programmatic URLCache purge above is sufficient for the
+        // legacy-cache concern; if some old build ever left a Cache.db on
+        // disk it's inert now because our sessions don't use URLCache at
+        // all. Do NOT reintroduce a blanket bundle-cache wipe without a
+        // surgical alternative (only touch `Cache.db*`, leave Core ML
+        // and WhisperKit's dirs alone).
 
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)

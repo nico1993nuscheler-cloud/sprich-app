@@ -56,15 +56,24 @@ final class WhisperModelManager: ObservableObject {
     @Published private(set) var isPipeReady: Bool = false
 
     /// Called by `LocalWhisperService` when a pipe successfully loads.
+    ///
+    /// Deferred to the next runloop tick so that transitioning this
+    /// `@Published` value never happens inside a SwiftUI view-update
+    /// cycle — which causes "Publishing changes from within view
+    /// updates is not allowed" warnings and can desync observers.
     func markPipeReady() {
-        isPipeReady = true
+        DispatchQueue.main.async { [weak self] in
+            self?.isPipeReady = true
+        }
     }
 
     /// Called by `LocalWhisperService` when it starts a new load or
     /// unloads an existing pipe (e.g. because the user switched
     /// Whisper tiers in Settings).
     func markPipeNotReady() {
-        isPipeReady = false
+        DispatchQueue.main.async { [weak self] in
+            self?.isPipeReady = false
+        }
     }
 
     /// Absolute URL WhisperKit will download into. A model ends up at
