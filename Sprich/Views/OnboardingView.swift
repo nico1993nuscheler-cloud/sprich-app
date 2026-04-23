@@ -245,36 +245,41 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step 3 — Provider choice (Local recommended, cloud advanced)
+    // MARK: - Step 3 — Provider choice (Local default, cloud recommended)
 
     private var providerChoiceStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Step 3 — Choose your transcription").font(.title2).fontWeight(.semibold)
 
-            Text("Sprich can transcribe fully on your Mac or use a cloud API. Most people start with Local — no account, no per-minute cost, nothing leaves the device.")
+            Text("Sprich can transcribe fully on your Mac (default) or use a cloud API (recommended for the fastest, most polished experience).")
                 .foregroundColor(.secondary)
 
-            // Local (recommended) card — selected by default.
+            // Local (default) card — selected by default so "just click
+            // Continue" is a valid path. Still the privacy-first option
+            // that requires no key — but we no longer label it
+            // "recommended", because for creators who want maximum speed
+            // and quality the cloud path is what we recommend.
             providerOptionCard(
                 choice: .local,
                 icon: "lock.shield.fill",
-                title: "Local (recommended)",
+                title: "Local (default)",
                 badge: "No account · No API key · ~\(WhisperModelCatalog.balanced.approxSizeMB) MB one-time download",
-                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Picks the Balanced tier — you can change this later in Settings."
+                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Best privacy, zero per-dictation cost. Pick Balanced tier — change later in Settings."
             )
 
-            // Cloud (advanced) — collapsed by default, shows Groq key entry.
+            // Cloud (recommended). Collapsed by default, but the label
+            // explicitly calls out why someone would open it.
             DisclosureGroup(isExpanded: $cloudDisclosureExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Pick the cloud option if you need the lowest possible latency (≈ 0.5 s) and don't mind a key + per-minute cost (Groq ≈ €0.0007/min, free tier covers typical daily use).")
+                    Text("A cloud provider key unlocks two things at once: faster, more polished transcription (Groq Whisper ≈ 0.5 s round-trip) AND the AI-powered cleanup used in Formal and Custom modes. Without a cloud key, only Literal mode works.")
                         .font(.caption).foregroundColor(.secondary)
 
                     providerOptionCard(
                         choice: .groq,
                         icon: "bolt.fill",
-                        title: "Cloud — Groq (fastest)",
-                        badge: "Free tier · ≈ €0.0007/min after",
-                        description: "Sends audio to Groq's API. Same key powers Formal-mode cleanup."
+                        title: "Cloud — Groq (recommended)",
+                        badge: "Free tier · ≈ €0.0007/min after · powers STT + Formal cleanup",
+                        description: "Sends audio to Groq's API for transcription. Same key drives the Formal-mode AI polish, so one key gets you everything."
                     )
 
                     if providerChoice == .groq {
@@ -298,8 +303,26 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 8)
             } label: {
-                Text("Advanced — use a cloud provider")
+                Text("Cloud — recommended for fastest speed and Formal-mode cleanup")
                     .font(.system(size: 13, weight: .medium))
+            }
+
+            // Heads-up for users who pick Local without adding any cloud
+            // key: Formal/Custom modes call an LLM, and the LLM path is
+            // always cloud. Literal is purely local.
+            if providerChoice == .local && !hasAnyCloudLLMKey {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Local covers transcription (Literal mode). Formal and Custom modes still need a cloud LLM key — expand the section above, or add one later in Settings → API Keys.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.accentColor.opacity(0.08))
+                )
             }
 
             Spacer()
@@ -336,6 +359,21 @@ struct OnboardingView: View {
             return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
         }
         return false
+    }
+
+    /// True when the user has a cloud LLM key stored in Keychain for any
+    /// provider. Drives the "Formal/Custom need a cloud key" hint below
+    /// the Local card — we only nag users who'd actually be missing
+    /// Formal/Custom functionality. A user who already had Groq set up
+    /// from a previous install is silent-ok.
+    private var hasAnyCloudLLMKey: Bool {
+        let candidates: [LLMProviderType] = [.groq, .claude, .google, .openai]
+        for provider in candidates {
+            if let v = KeychainManager.retrieve(key: provider.keychainKey),
+               !v.isEmpty { return true }
+        }
+        // Also a Groq key entered on this very screen counts.
+        return !groqKey.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// Execute the side effects of the provider choice: save the STT

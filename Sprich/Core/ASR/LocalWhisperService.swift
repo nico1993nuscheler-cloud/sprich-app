@@ -129,7 +129,15 @@ actor LocalWhisperService {
             withoutTimestamps: true,
             compressionRatioThreshold: nil,
             logProbThreshold: nil,
-            noSpeechThreshold: nil
+            noSpeechThreshold: nil,
+            // VAD-based chunking. Without this, WhisperKit's default is
+            // to process one 30 s window only — any audio longer than
+            // that silently drops. `AppSettings.maxRecordingDuration`
+            // defaults to 300 s (5 min) and is user-configurable, so
+            // >30 s clips are well within normal usage. VAD chunks at
+            // speech-pause boundaries so split points don't land
+            // mid-word.
+            chunkingStrategy: .vad
         )
 
         let results: [TranscriptionResult] = try await pipe.transcribe(
