@@ -24,6 +24,12 @@ class AudioRecorder {
     /// Called on each audio buffer with the current RMS level (0.0–1.0).
     var onAudioLevel: ((Float) -> Void)?
 
+    /// Fired when the `maxDuration` cap trips mid-recording. Delivers the
+    /// WAV-encoded audio captured up to that point so the pipeline can
+    /// process it instead of dropping it — the user's minutes of speech
+    /// are not wasted. Callback runs on the main thread.
+    var onMaxDurationReached: ((Data) -> Void)?
+
     init(maxDuration: TimeInterval = 300) {  // 5 minutes default
         self.maxDuration = maxDuration
     }
@@ -44,11 +50,22 @@ class AudioRecorder {
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             guard let self = self, self.isRecording else { return }
 
-            // Check max duration
+            // Check max duration. Previously this called
+            // `stopRecording()` and discarded the result, which meant
+            // the user lost every second of audio past the cap because
+            // the subsequent hotkey release saw `isRecording = false`
+            // and got `nil` back. Now we keep the captured WAV and
+            // surface it to the coordinator via `onMaxDurationReached`,
+            // which processes it through the normal pipeline + appends
+            // a notice telling the user to press the hotkey again to
+            // continue dictating.
             if let start = self.recordingStartTime,
                Date().timeIntervalSince(start) > self.maxDuration {
-                DispatchQueue.main.async {
-                    _ = try? self.stopRecording()
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if let wav = try? self.stopRecording() {
+                        self.onMaxDurationReached?(wav)
+                    }
                 }
                 return
             }
