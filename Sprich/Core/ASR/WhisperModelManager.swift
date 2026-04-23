@@ -103,11 +103,35 @@ final class WhisperModelManager: ObservableObject {
                 // moment the download sheet closed. Caching side-steps any
                 // future HubApi path convention changes too.
                 self.knownFolders[model] = folder
+
+                // Pre-warm the WhisperKit pipe (Core ML first-compile)
+                // BEFORE signalling `.ready`. Historically we emitted
+                // `.ready` as soon as the bytes were on disk and let the
+                // compile happen lazily inside `LocalWhisperService` on
+                // the first dictation — which meant the user clicked
+                // "Done", confidently pressed their hotkey, and then
+                // waited 10-30 s while Core ML specialized the model.
+                // That's the worst place to pay it. Front-load the cost
+                // here so the download sheet stays on "Preparing…" until
+                // the pipe is genuinely warm, and the first dictation
+                // after Done is instant.
+                //
+                // Failure here is non-fatal: if prewarm throws, we still
+                // mark the model `.ready` (bytes are on disk) and the
+                // next `transcribe` call will retry the load. The user
+                // just loses the first-dictation-is-instant property.
                 self.state = .preparing
-                // `.ready` is signalled once the bytes are on disk. Core ML
-                // first-compile happens inside LocalWhisperService when it
-                // constructs the WhisperKit pipe; that keeps "download"
-                // observable separately from "model loadable".
+                do {
+                    try await TranscriptionService.localWhisper.prewarm(
+                        model: model,
+                        modelFolder: folder
+                    )
+                } catch {
+                    #if DEBUG
+                    print("[Sprich] Prewarm after download failed — will retry on first dictation: \(error)")
+                    #endif
+                }
+
                 let size = self.folderSize(folder)
                 self.state = .ready(model: model, sizeBytes: size)
                 return folder

@@ -160,7 +160,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Local dictation won't work until the model is downloaded.")
                             .font(.system(size: 12, weight: .semibold))
-                        Text("Click Download above. ~626 MB, one-time.")
+                        Text(missingModelCallToAction)
                             .font(.caption).foregroundColor(.secondary)
                     }
                 }
@@ -207,6 +207,17 @@ struct SettingsView: View {
         case .ready, .downloading, .preparing: return false
         case .absent, .unknown, .failed: return true
         }
+    }
+
+    /// "~216 MB, one-time." / "~632 MB, one-time." etc, driven by the
+    /// currently-selected model's catalog entry.
+    private var missingModelCallToAction: String {
+        if let option = WhisperModelCatalog.option(
+            for: appState.settings.localWhisperModel
+        ) {
+            return "Click Download above. ~\(option.approxSizeMB) MB, one-time."
+        }
+        return "Click Download above."
     }
 
     private var statusIconName: String {
@@ -849,7 +860,7 @@ struct SettingsView: View {
             case .deepgram:
                 Text("Nova-3 model (~$0.008/min). Excellent real-time performance.")
             case .local:
-                Text("Runs fully on-device with WhisperKit — no network, no API key. ~626 MB one-time download.")
+                Text("Runs fully on-device with WhisperKit — no network, no API key. Pick a tier below.")
             }
         }
         .font(.caption)
