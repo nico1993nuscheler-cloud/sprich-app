@@ -18,6 +18,10 @@ xcuserdata/
 *.app
 *.dSYM
 *.ipa
+.build/
 
 # Distribution
 dist/
+
+# Temporary scratch (design handoffs, exploratory notes, etc.)
+.tmp/
