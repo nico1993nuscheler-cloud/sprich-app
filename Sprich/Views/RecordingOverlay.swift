@@ -10,10 +10,11 @@ class RecordingOverlayController {
     private var window: NSPanel?
     private let state = RecordingOverlayState()
 
-    // Pill size — chosen to fit icon + 28-bar waveform + mode label + record dot
-    // comfortably without truncation at any of the three mode strings.
-    private let pillWidth: CGFloat = 360
-    private let pillHeight: CGFloat = 64
+    // Pill dimensions match the landing HUD's compact-mode rendering.
+    // Width is intrinsic in SwiftUI; we host the SwiftUI view in a panel
+    // sized generously and let the Capsule shrink to fit content.
+    private let panelWidth: CGFloat = 460
+    private let panelHeight: CGFloat = 130
 
     private init() {}
 
@@ -68,12 +69,10 @@ class RecordingOverlayController {
 
     private func createWindow() {
         let hostingView = NSHostingView(rootView: RecordingOverlayView(state: state))
-        // Hosting view sits on top of the panel; transcribed-text bubble can
-        // expand below it, so leave headroom on the panel content rect.
-        hostingView.frame = NSRect(x: 0, y: 0, width: pillWidth, height: pillHeight)
+        hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: pillWidth, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -155,6 +154,21 @@ class RecordingOverlayState: ObservableObject {
 }
 
 // MARK: - Main View
+//
+// 1:1 port of the landing HUD pill (`project/shared/hud.jsx#LiveHUD`):
+//
+//   ┌──────────────────────────────────────────────────────────────────┐
+//   │ [S logo]  [───  bar waveform  ───]  │  [● LITERAL]                │  ← cream pill
+//   └──────────────────────────────────────────────────────────────────┘
+//                                      ▲
+//                                      └ vertical hairline divider
+//
+// Spacing tokens carry directly from hud.jsx's compact-mode (gap:12, padding:10×16):
+//   - Outer pill: cream bg, 1px border, full radius, 24/2-radius drop shadow
+//   - S logo: 28×28 forest rounded square with cream "S"
+//   - Waveform: 28 mode-colored bars
+//   - Divider: 1×22 border-color hairline
+//   - Mode sub-pill: mode-color bg, ink text + ink dot, 6×14 padding, full radius
 
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
@@ -162,43 +176,24 @@ struct RecordingOverlayView: View {
     private var accent: Color { state.mode.accentColor }
 
     var body: some View {
-        VStack(spacing: 6) {
-            // Main HUD pill
+        VStack(spacing: 8) {
+            // Main HUD pill — matches LiveHUD compact rendering
             HStack(spacing: 12) {
-                // App icon (uses existing SprichLogo asset; falls back to a forest dot if missing)
-                Image("SprichLogo")
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 24, height: 24)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                SprichAppIcon()
+                    .frame(width: 28, height: 28)
 
-                // Bar-array waveform — matches landing's LiveWaveform component.
                 BarWaveform(state: state, color: accent)
-                    .frame(width: 116, height: 32)
+                    .frame(width: 132, height: 32)
 
-                Spacer(minLength: 0)
-
-                // Mode label — prominently shows what the user is dictating in.
-                // Large enough to read at a glance, monospaced for keyboard-feel,
-                // tracked for the same vibe as eyebrow text on the landing.
-                Text(state.modeDisplayName)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .tracking(2.0)
-                    .foregroundColor(.sprichInk2)
-                    .fixedSize()
-
-                // Vertical hairline divider matches landing HUD
+                // Vertical hairline divider — exact match to hud.jsx line 133/140
                 Rectangle()
                     .fill(Color.sprichBorder)
                     .frame(width: 1, height: 22)
 
-                // Phase indicator — recording dot OR small spinner
-                phaseIndicator
-                    .frame(width: 16, height: 16)
+                ModeBadge(state: state, accent: accent)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .frame(width: 360, height: 56)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .background(
                 Capsule()
                     .fill(Color.sprichCream)
@@ -209,6 +204,7 @@ struct RecordingOverlayView: View {
                 Capsule()
                     .strokeBorder(Color.sprichBorder, lineWidth: 1)
             )
+            .fixedSize()  // shrink Capsule to intrinsic content width
 
             // Transcribed text bubble (appears after STT, before LLM cleanup)
             if let text = state.transcribedText, !text.isEmpty {
@@ -217,7 +213,7 @@ struct RecordingOverlayView: View {
                     .foregroundColor(.sprichInk2)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
+                    .frame(maxWidth: 360)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(
@@ -234,19 +230,70 @@ struct RecordingOverlayView: View {
         }
         .animation(.easeOut(duration: 0.15), value: state.phase == .cleaning)
         .animation(.easeOut(duration: 0.15), value: state.transcribedText)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    @ViewBuilder
-    private var phaseIndicator: some View {
-        switch state.phase {
-        case .recording:
-            RecordingDot()
-        case .processing, .cleaning:
-            ProgressView()
-                .controlSize(.small)
-                .tint(accent)
-                .scaleEffect(0.7)
+// MARK: - Sprich App Icon
+//
+// Programmatic render of `assets/logo/app-icon-s-forest.svg` — forest rounded
+// square with the cream "S" wordmark. SwiftUI shapes give us perfect Retina
+// scaling without needing to ship the SVG as an asset, and it inherits any
+// future ModeTokens.swift palette changes for free.
+
+struct SprichAppIcon: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.sprichForest)
+            Text("S")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundColor(Color.sprichCream)
+                .offset(y: -0.5)  // optical centering for the rounded glyph
         }
+    }
+}
+
+// MARK: - Mode Badge
+//
+// Right-side sub-pill carrying the active mode. Mode-colored bg, ink dot + text.
+// During recording: ink dot. During processing/cleaning: small mode-tinted spinner.
+
+struct ModeBadge: View {
+    @ObservedObject var state: RecordingOverlayState
+    let accent: Color
+
+    /// Per-mode contrast color for content rendered on top of the mode-color
+    /// capsule. Lavender (Formal) needs cream to be legible; mint and peach
+    /// can keep ink. See `TranscriptionMode.accentForeground`.
+    private var foreground: Color { state.mode.accentForeground }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch state.phase {
+            case .recording:
+                Circle()
+                    .fill(foreground)
+                    .frame(width: 7, height: 7)
+            case .processing, .cleaning:
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(foreground)
+                    .frame(width: 7, height: 7)
+            }
+
+            Text(state.modeDisplayName)
+                .font(.system(size: 11, weight: .semibold, design: .default))
+                .tracking(1.0)
+                .foregroundColor(foreground)
+                .fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(accent)
+        )
     }
 }
 
@@ -263,7 +310,7 @@ struct BarWaveform: View {
 
     private let barCount = 28
     private let barWidth: CGFloat = 3
-    private let barGap: CGFloat = 3
+    private let barGap: CGFloat = 2
     private let cornerRadius: CGFloat = 1.5
 
     var body: some View {
@@ -296,34 +343,5 @@ struct BarWaveform: View {
         let raw  = max(0.12, (base + mid + hi) * env * intensity)
         // 32pt is the container's intrinsic height; scale unit-height into pt.
         return CGFloat(min(1.0, raw)) * 32.0
-    }
-}
-
-// MARK: - Recording Dot
-//
-// Pulsing red dot — matches the landing HUD's `sprichPulse` keyframe.
-// Two layers: solid core + animated halo.
-
-struct RecordingDot: View {
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.sprichRecordDot.opacity(pulse ? 0.0 : 0.45))
-                .frame(width: pulse ? 16 : 7, height: pulse ? 16 : 7)
-                .animation(
-                    Animation.easeOut(duration: 1.2).repeatForever(autoreverses: false),
-                    value: pulse
-                )
-            Circle()
-                .fill(Color.sprichRecordDot)
-                .frame(width: 7, height: 7)
-        }
-        .frame(width: 16, height: 16)
-        .onAppear {
-            // Defer one frame so the animation actually starts from the .true side.
-            DispatchQueue.main.async { pulse = true }
-        }
     }
 }
