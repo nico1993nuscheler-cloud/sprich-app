@@ -42,4 +42,20 @@ extension TranscriptionMode {
         case .custom:  return .modeCustom
         }
     }
+
+    /// Foreground color (text + iconography) for content rendered ON TOP of
+    /// `accentColor` — e.g. the mode label + dot inside the overlay's mode
+    /// sub-pill. Picked per-mode for AA-readable contrast:
+    ///
+    /// - Literal mint (#59D9A6, L≈82)  → ink (#1A1A18, L≈10) — high contrast ✓
+    /// - Formal lavender (#8C73F2, L≈58) → cream (#FAFAF7, L≈98) — ink reads
+    ///   muddy on the saturated purple; cream pops cleanly
+    /// - Custom peach (#F2A659, L≈73)  → ink (#1A1A18, L≈10) — high contrast ✓
+    var accentForeground: Color {
+        switch self {
+        case .literal: return .sprichInk
+        case .formal:  return .sprichCream
+        case .custom:  return .sprichInk
+        }
+    }
 }
