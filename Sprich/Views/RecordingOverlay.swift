@@ -10,6 +10,11 @@ class RecordingOverlayController {
     private var window: NSPanel?
     private let state = RecordingOverlayState()
 
+    // Pill size — chosen to fit icon + 28-bar waveform + mode label + record dot
+    // comfortably without truncation at any of the three mode strings.
+    private let pillWidth: CGFloat = 360
+    private let pillHeight: CGFloat = 64
+
     private init() {}
 
     func show(mode: TranscriptionMode, badge: String? = nil, displayName: String? = nil) {
@@ -19,7 +24,7 @@ class RecordingOverlayController {
         state.transcribedText = nil
         state.modeBadge = badge ?? mode.defaultBadgeLetter
         state.modeDisplayName = (displayName ?? mode.displayName).uppercased()
-        state.startScanner()
+        state.startWaveformClock()
 
         if window == nil {
             createWindow()
@@ -40,7 +45,7 @@ class RecordingOverlayController {
 
     func showProcessing() {
         state.phase = .processing
-        state.stopScanner()
+        state.stopWaveformClock()
     }
 
     func showTranscribedText(_ text: String) {
@@ -49,7 +54,7 @@ class RecordingOverlayController {
     }
 
     func dismiss() {
-        state.stopScanner()
+        state.stopWaveformClock()
         let win = window
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.1
@@ -63,17 +68,19 @@ class RecordingOverlayController {
 
     private func createWindow() {
         let hostingView = NSHostingView(rootView: RecordingOverlayView(state: state))
-        hostingView.frame = NSRect(x: 0, y: 0, width: 280, height: 56)
+        // Hosting view sits on top of the panel; transcribed-text bubble can
+        // expand below it, so leave headroom on the panel content rect.
+        hostingView.frame = NSRect(x: 0, y: 0, width: pillWidth, height: pillHeight)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 280, height: 100),
+            contentRect: NSRect(x: 0, y: 0, width: pillWidth, height: 120),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        panel.hasShadow = false  // shadow rendered in SwiftUI for design control
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         panel.isMovableByWindowBackground = false
@@ -104,82 +111,46 @@ class RecordingOverlayState: ObservableObject {
     @Published var modeBadge: String = "L"
     @Published var modeDisplayName: String = "LITERAL"
 
-    // Voice-driven KITT scanner — the leader position is integrated from
-    // live audio level, so the scanner moves in the rhythm of your voice,
-    // not a fixed clock. Near-silent → drifts slowly. Loud speech → darts.
-    @Published var scannerLeader: Double = 0           // 0 ... (segmentCount - 1)
-    @Published var scannerSmoothedLevel: Float = 0     // EMA of audioLevel for brightness
-    /// Smoothed sweep sign in [-1, 1]. Lerps toward ±1 at direction flips so the
-    /// bar's horizontal lean eases through the turnaround instead of snapping.
-    @Published var scannerSweepSign: Double = 1.0
+    /// Continuously-incrementing clock the waveform reads. Time-driven so bars
+    /// have a voice-shaped baseline animation even during silent moments;
+    /// audio level then scales their amplitude. Matches `useRaf` in landing's
+    /// `hud.jsx#LiveWaveform` (dt * 6 increment).
+    @Published var waveformClock: Double = 0
+    @Published var smoothedLevel: Float = 0     // EMA of audioLevel for steady amplitude
 
-    private var scannerDirection: Double = 1.0
-    private var scannerTimer: Timer?
+    private var clockTimer: Timer?
     private var lastTick: CFTimeInterval = 0
 
-    /// Max segment index the leader can reach — set by the scanner view
-    /// so the state object doesn't need to know the segment count.
-    var scannerMaxIndex: Double = 10.0                 // segmentCount - 1
-
-    // Velocity tuning (segments per second)
-    // AudioRecorder RMS typically sits at ~0.2–0.4 for normal speech and
-    // ~0.55+ for emphasis, so we boost the input range and use a sqrt
-    // curve (gentler than linear) — silence is calm, normal speech is
-    // clearly kinetic, shouts whip across.
-    private let idleVelocity: Double = 3.2             // always visibly moving
-    private let peakVelocity: Double = 24.0            // whips across when loud
-    private let levelGain: Double = 2.6                // amplify raw RMS
-
-    func startScanner() {
-        stopScanner()
-        scannerLeader = 0
-        scannerDirection = 1
-        scannerSweepSign = 1
-        scannerSmoothedLevel = 0
+    func startWaveformClock() {
+        stopWaveformClock()
+        waveformClock = 0
+        smoothedLevel = 0
         lastTick = CACurrentMediaTime()
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.tickScanner()
+            self?.tickWaveform()
         }
         RunLoop.main.add(timer, forMode: .common)
-        scannerTimer = timer
+        clockTimer = timer
     }
 
-    func stopScanner() {
-        scannerTimer?.invalidate()
-        scannerTimer = nil
+    func stopWaveformClock() {
+        clockTimer?.invalidate()
+        clockTimer = nil
     }
 
-    private func tickScanner() {
+    private func tickWaveform() {
         let now = CACurrentMediaTime()
-        let dt = min(now - lastTick, 0.1)              // clamp on hitches
+        let dt = min(now - lastTick, 0.1)
         lastTick = now
 
-        // Smooth the audio level a bit so transients don't jitter the sweep
-        // but real speech rhythm (syllables, pauses) still comes through.
+        // Match landing hud.jsx: t += dt * 6 — gives the right perceptual cadence
+        // for the composite-sine-wave bars below.
+        waveformClock += dt * 6.0
+
+        // Smooth audio level so transients don't make the waveform jitter,
+        // but real speech rhythm still comes through.
         let alpha: Float = 0.28
-        scannerSmoothedLevel += alpha * (audioLevel - scannerSmoothedLevel)
-
-        // Boost raw RMS into a more useful 0–1 range, then sqrt so mid-level
-        // speech actually lives in the middle of the velocity range.
-        let boosted = min(1.0, Double(scannerSmoothedLevel) * levelGain)
-        let shaped = sqrt(boosted)
-        let velocity = idleVelocity + (peakVelocity - idleVelocity) * shaped
-
-        var pos = scannerLeader + scannerDirection * velocity * dt
-        if pos >= scannerMaxIndex {
-            pos = scannerMaxIndex
-            scannerDirection = -1
-        } else if pos <= 0 {
-            pos = 0
-            scannerDirection = 1
-        }
-        scannerLeader = pos
-
-        // Ease the published sweep sign toward the current direction so
-        // direction flips produce a spring-like horizontal lean reversal
-        // instead of snapping the whole bar sideways in one frame.
-        let signBlend: Double = 0.15
-        scannerSweepSign += signBlend * (scannerDirection - scannerSweepSign)
+        smoothedLevel += alpha * (audioLevel - smoothedLevel)
     }
 }
 
@@ -188,126 +159,75 @@ class RecordingOverlayState: ObservableObject {
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
 
-    private let bgColor = Color(white: 0.08)
-    private let borderColor = Color(white: 0.22)
-    private let accentLiteral = Color(red: 0.35, green: 0.85, blue: 0.65)   // Teal-green
-    private let accentFormal = Color(red: 0.55, green: 0.45, blue: 0.95)    // Indigo
-    private let accentCustom = Color(red: 0.95, green: 0.65, blue: 0.35)    // Amber
-
-    private var accent: Color {
-        switch state.mode {
-        case .literal: return accentLiteral
-        case .formal:  return accentFormal
-        case .custom:  return accentCustom
-        }
-    }
+    private var accent: Color { state.mode.accentColor }
 
     var body: some View {
-        VStack(spacing: 4) {
-            // Main HUD bar
-            HStack(spacing: 0) {
-                // Mode badge — pulsing halo driven by audio level
-                Text(state.modeBadge)
-                    .font(.system(size: 12, weight: .black, design: .monospaced))
-                    .foregroundColor(bgColor)
+        VStack(spacing: 6) {
+            // Main HUD pill
+            HStack(spacing: 12) {
+                // App icon (uses existing SprichLogo asset; falls back to a forest dot if missing)
+                Image("SprichLogo")
+                    .resizable()
+                    .interpolation(.high)
                     .frame(width: 24, height: 24)
-                    .background(accent, in: RoundedRectangle(cornerRadius: 5))
-                    .shadow(
-                        color: accent.opacity(
-                            state.phase == .recording
-                                ? 0.3 + 0.6 * Double(state.audioLevel)
-                                : 0
-                        ),
-                        radius: state.phase == .recording
-                            ? 4 + 10 * CGFloat(state.audioLevel)
-                            : 0
-                    )
-                    .padding(.trailing, 10)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
 
-                if state.phase == .recording {
-                    // KITT-style scanner bar — color pulses with audio input
-                    KITTScannerBar(state: state, color: accent)
-                        .frame(width: 72, height: 26)
+                // Bar-array waveform — matches landing's LiveWaveform component.
+                BarWaveform(state: state, color: accent)
+                    .frame(width: 116, height: 32)
 
-                    Spacer().frame(width: 10)
+                Spacer(minLength: 0)
 
-                    // Audio-reactive REC label
-                    Text("REC")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(accent)
-                        .opacity(0.55 + 0.45 * Double(state.audioLevel))
-                } else {
-                    // Processing spinner
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(accent)
-                        .scaleEffect(0.8)
-                        .frame(width: 16, height: 16)
-
-                    Spacer().frame(width: 8)
-
-                    Text(state.phase == .processing ? "STT" : "LLM")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(accent.opacity(0.8))
-                }
-
-                Spacer()
-
-                // Mode name
+                // Mode label — prominently shows what the user is dictating in.
+                // Large enough to read at a glance, monospaced for keyboard-feel,
+                // tracked for the same vibe as eyebrow text on the landing.
                 Text(state.modeDisplayName)
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(Color(white: 0.5))
-                    .tracking(1.5)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .tracking(2.0)
+                    .foregroundColor(.sprichInk2)
+                    .fixedSize()
+
+                // Vertical hairline divider matches landing HUD
+                Rectangle()
+                    .fill(Color.sprichBorder)
+                    .frame(width: 1, height: 22)
+
+                // Phase indicator — recording dot OR small spinner
+                phaseIndicator
+                    .frame(width: 16, height: 16)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(width: 240)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .frame(width: 360, height: 56)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(bgColor.opacity(0.92))
-                    // Outer accent glow scales with audio level — the whole HUD "breathes" with your voice.
-                    .shadow(
-                        color: accent.opacity(
-                            state.phase == .recording
-                                ? 0.15 + 0.35 * Double(state.audioLevel)
-                                : 0.15
-                        ),
-                        radius: state.phase == .recording
-                            ? 12 + 10 * CGFloat(state.audioLevel)
-                            : 12,
-                        y: 2
-                    )
+                Capsule()
+                    .fill(Color.sprichCream)
+                    .shadow(color: Color.sprichInk.opacity(0.12), radius: 24, x: 0, y: 8)
+                    .shadow(color: Color.sprichInk.opacity(0.05), radius: 2, x: 0, y: 1)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(borderColor.opacity(0.5), lineWidth: 0.5)
-            )
-            .overlay(
-                // Subtle top-edge glow
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [accent.opacity(0.3), .clear, .clear],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                Capsule()
+                    .strokeBorder(Color.sprichBorder, lineWidth: 1)
             )
 
-            // Transcribed text (appears after STT)
+            // Transcribed text bubble (appears after STT, before LLM cleanup)
             if let text = state.transcribedText, !text.isEmpty {
                 Text(text)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(white: 0.55))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.sprichInk2)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 230)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .frame(maxWidth: 320)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(bgColor.opacity(0.85))
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.sprichCreamAlt)
+                            .shadow(color: Color.sprichInk.opacity(0.08), radius: 8, x: 0, y: 2)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(Color.sprichBorder, lineWidth: 1)
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
             }
@@ -316,70 +236,94 @@ struct RecordingOverlayView: View {
         .animation(.easeOut(duration: 0.15), value: state.transcribedText)
     }
 
+    @ViewBuilder
+    private var phaseIndicator: some View {
+        switch state.phase {
+        case .recording:
+            RecordingDot()
+        case .processing, .cleaning:
+            ProgressView()
+                .controlSize(.small)
+                .tint(accent)
+                .scaleEffect(0.7)
+        }
+    }
 }
 
-// MARK: - KITT Scanner Bar
-// Knight-Rider-style LED sweep. A leader segment slides back and forth across
-// the bar; trailing segments glow with a falling-off intensity. Audio level
-// modulates brightness, segment height, glow radius, and sweep speed.
+// MARK: - Bar Waveform
+//
+// Swift port of the landing's `LiveWaveform` (project/shared/hud.jsx) — 28 bars
+// driven by composite sine waves so the shape feels voice-organic, not robotic.
+// Heights are then scaled by smoothed audio level so loud speech visibly lifts
+// the whole bank and silent stretches settle to a calm baseline.
 
-struct KITTScannerBar: View {
+struct BarWaveform: View {
     @ObservedObject var state: RecordingOverlayState
     let color: Color
-    private let segmentCount = 11
-    private let trailWidth: Double = 3.2   // how many neighbors glow behind the leader
 
-    // Physicality constants — louder audio → more motion. Tune here.
-    private let maxSway: CGFloat = 6.0     // horizontal lean of the whole bar, pt
-    private let bendAmp: CGFloat = 8.0     // peak vertical bulge at the leader, pt
+    private let barCount = 28
+    private let barWidth: CGFloat = 3
+    private let barGap: CGFloat = 3
+    private let cornerRadius: CGFloat = 1.5
 
     var body: some View {
-        let leaderPos = state.scannerLeader
-        let rawLevel = CGFloat(state.scannerSmoothedLevel)
-        // Mirror the velocity curve: normal speech should look mid-bright,
-        // not floor-of-the-range. Boost + sqrt so ~0.3 RMS reads as ~0.88.
-        let boostedLevel = min(1.0, Double(rawLevel) * 2.6)
-        let shapedLevel = sqrt(boostedLevel)
+        // Read once per render — SwiftUI repaints when @Published clock changes.
+        let t = state.waveformClock
+        let level = Double(state.smoothedLevel)
+        // Map raw RMS (~0.1–0.5 typical) into a 0–1 amplitude range. Sqrt curve
+        // so mid-level speech reads as clearly mid-bright, not floor.
+        let boosted = min(1.0, level * 2.6)
+        let intensity = sqrt(boosted) * 0.5 + 0.5  // 0.5 floor → bars never collapse
 
-        // Leader is always solidly lit. Trailing segments fall off from there.
-        // Brighter floor so the bar is always visible, even in pauses.
-        let audioBoost = 0.60 + shapedLevel * 0.70
-        let floorBrightness = 0.22 + shapedLevel * 0.15
-
-        // Whole-bar horizontal lean: follows the sweep direction, scaled by loudness.
-        let swayX = CGFloat(state.scannerSweepSign * shapedLevel) * maxSway
-
-        HStack(spacing: 2) {
-            ForEach(0..<segmentCount, id: \.self) { i in
-                let signedDist = Double(i) - leaderPos
-                let absDist = abs(signedDist)
-                let baseFalloff = max(0, 1.0 - absDist / trailWidth)
-                let bright = min(1.25, baseFalloff * audioBoost + floorBrightness)
-
-                // Per-segment vertical bend — a bell around the leader so the
-                // bar forms a traveling wave crest instead of a flat strip.
-                // Segments beyond ±trailWidth from the leader sit flat.
-                let bendShape = absDist < trailWidth
-                    ? cos(signedDist / trailWidth * .pi / 2)
-                    : 0.0
-                let bumpY = -CGFloat(bendShape * shapedLevel) * bendAmp
-
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(color.opacity(min(1.0, bright)))
-                    .frame(
-                        width: 4.5,
-                        height: 18 + CGFloat(bright) * 6 + CGFloat(shapedLevel) * 3
-                    )
-                    .shadow(
-                        color: color.opacity(bright * 0.95),
-                        radius: 2.5 + CGFloat(bright) * 5
-                    )
-                    .offset(y: bumpY)
+        HStack(spacing: barGap) {
+            ForEach(0..<barCount, id: \.self) { i in
+                let height = barHeight(index: i, t: t, intensity: intensity)
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(color)
+                    .frame(width: barWidth, height: height)
             }
         }
-        .offset(x: swayX)
+        .frame(maxHeight: .infinity, alignment: .center)
+    }
+
+    /// Composite sine waves — matches the landing's LiveWaveform formula 1:1.
+    /// `base + mid + hi` ride atop an envelope so the whole bar bank breathes.
+    private func barHeight(index i: Int, t: Double, intensity: Double) -> CGFloat {
+        let base = 0.28 + 0.28 * sin(t * 0.9 + Double(i) * 0.35)
+        let mid  = 0.22 * sin(t * 1.7 - Double(i) * 0.22)
+        let hi   = 0.12 * sin(t * 3.3 + Double(i) * 0.6)
+        let env  = 0.72 + 0.28 * sin(t * 0.33 + Double(i) * 0.1)
+        let raw  = max(0.12, (base + mid + hi) * env * intensity)
+        // 32pt is the container's intrinsic height; scale unit-height into pt.
+        return CGFloat(min(1.0, raw)) * 32.0
+    }
+}
+
+// MARK: - Recording Dot
+//
+// Pulsing red dot — matches the landing HUD's `sprichPulse` keyframe.
+// Two layers: solid core + animated halo.
+
+struct RecordingDot: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.sprichRecordDot.opacity(pulse ? 0.0 : 0.45))
+                .frame(width: pulse ? 16 : 7, height: pulse ? 16 : 7)
+                .animation(
+                    Animation.easeOut(duration: 1.2).repeatForever(autoreverses: false),
+                    value: pulse
+                )
+            Circle()
+                .fill(Color.sprichRecordDot)
+                .frame(width: 7, height: 7)
+        }
+        .frame(width: 16, height: 16)
         .onAppear {
-            state.scannerMaxIndex = Double(segmentCount - 1)
+            // Defer one frame so the animation actually starts from the .true side.
+            DispatchQueue.main.async { pulse = true }
         }
     }
 }

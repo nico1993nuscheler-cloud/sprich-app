@@ -36,6 +36,7 @@
 		A10000027 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = H10000001 /* WhisperKit */; };
 		A10000028 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* NetworkReachability.swift */; };
 		A10000029 /* WhisperModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000031 /* WhisperModelCatalog.swift */; };
+		A10000030 /* ModeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000032 /* ModeTokens.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +71,7 @@
 		B10000029 /* ModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadView.swift; sourceTree = "<group>"; };
 		B10000030 /* NetworkReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkReachability.swift; sourceTree = "<group>"; };
 		B10000031 /* WhisperModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperModelCatalog.swift; sourceTree = "<group>"; };
+		B10000032 /* ModeTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeTokens.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +132,7 @@
 			isa = PBXGroup;
 			children = (
 				B10000010 /* TranscriptionMode.swift */,
+				B10000032 /* ModeTokens.swift */,
 				B10000011 /* Settings.swift */,
 				B10000024 /* Surface.swift */,
 			);
@@ -262,6 +265,7 @@
 				A10000008 /* PipelineCoordinator.swift in Sources */,
 				A10000009 /* SprichError.swift in Sources */,
 				A10000010 /* TranscriptionMode.swift in Sources */,
+				A10000030 /* ModeTokens.swift in Sources */,
 				A10000011 /* Settings.swift in Sources */,
 				A10000012 /* KeychainManager.swift in Sources */,
 				A10000013 /* InputSanitizer.swift in Sources */,
