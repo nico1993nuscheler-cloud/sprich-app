@@ -6,14 +6,19 @@ enum STTProviderType: String, Codable, CaseIterable {
     case groq = "Groq Whisper"
     case openai = "OpenAI Whisper"
     case deepgram = "Deepgram Nova-3"
+    case local = "Local (offline)"
 
     var displayName: String { rawValue }
+
+    /// True when this provider runs entirely on-device and needs no API key.
+    var isLocal: Bool { self == .local }
 
     var baseURL: String {
         switch self {
         case .groq: return "https://api.groq.com/openai/v1/audio/transcriptions"
         case .openai: return "https://api.openai.com/v1/audio/transcriptions"
         case .deepgram: return "https://api.deepgram.com/v1/listen"
+        case .local: return ""
         }
     }
 
@@ -22,15 +27,18 @@ enum STTProviderType: String, Codable, CaseIterable {
         case .groq: return "sprich.api.groq"
         case .openai: return "sprich.api.openai"
         case .deepgram: return "sprich.api.deepgram"
+        case .local: return ""
         }
     }
 
     /// Billing / upgrade dashboard users are pointed at when rate-limited.
+    /// Empty for local (no rate limits).
     var dashboardURL: String {
         switch self {
         case .groq: return "https://console.groq.com/settings/billing"
         case .openai: return "https://platform.openai.com/account/billing"
         case .deepgram: return "https://console.deepgram.com/billing"
+        case .local: return ""
         }
     }
 }
@@ -133,10 +141,19 @@ struct AppSettings: Codable {
     /// Literal and Custom modes are never affected.
     var adaptToSurface: Bool
 
+    /// WhisperKit model identifier for the local offline provider.
+    /// Resolved at runtime by `WhisperModelManager`.
+    var localWhisperModel: String
+
     var hasRequiredAPIKeys: Bool {
-        let sttKey = KeychainManager.retrieve(key: sttProvider.keychainKey)
+        // Local STT runs on-device — it needs a downloaded model, not a key.
+        // Readiness of the local model is tracked separately by WhisperModelManager
+        // so onboarding doesn't treat "no key" as a failure for local.
+        let sttOK = sttProvider.isLocal
+            ? true
+            : (KeychainManager.retrieve(key: sttProvider.keychainKey) != nil)
         let llmKey = KeychainManager.retrieve(key: llmProvider.keychainKey)
-        return sttKey != nil && llmKey != nil
+        return sttOK && llmKey != nil
     }
 
     func promptForMode(_ mode: TranscriptionMode) -> String {
@@ -188,6 +205,7 @@ struct AppSettings: Codable {
         self.inputMode            = (try? c.decode(InputMode.self,       forKey: .inputMode))            ?? d.inputMode
         self.maxRecordingDuration = (try? c.decode(Int.self,             forKey: .maxRecordingDuration)) ?? d.maxRecordingDuration
         self.adaptToSurface       = (try? c.decode(Bool.self,            forKey: .adaptToSurface))       ?? d.adaptToSurface
+        self.localWhisperModel    = (try? c.decode(String.self,          forKey: .localWhisperModel))    ?? d.localWhisperModel
     }
 
     // Memberwise init is suppressed once we declare `init(from:)`, so
@@ -210,7 +228,8 @@ struct AppSettings: Codable {
         glossaryReplacements: [GlossaryReplacement],
         inputMode: InputMode,
         maxRecordingDuration: Int,
-        adaptToSurface: Bool
+        adaptToSurface: Bool,
+        localWhisperModel: String
     ) {
         self.sttProvider = sttProvider
         self.llmProvider = llmProvider
@@ -230,6 +249,7 @@ struct AppSettings: Codable {
         self.inputMode = inputMode
         self.maxRecordingDuration = maxRecordingDuration
         self.adaptToSurface = adaptToSurface
+        self.localWhisperModel = localWhisperModel
     }
 
     static var defaults: AppSettings {
@@ -251,7 +271,14 @@ struct AppSettings: Codable {
             glossaryReplacements: [],
             inputMode: .holdToTalk,
             maxRecordingDuration: 300,
-            adaptToSurface: true
+            adaptToSurface: true,
+            // Default is the `_turbo_632MB` variant — same weights as
+            // the plain 626MB model (DoD "WER parity with Groq" still
+            // holds, Groq's whisper-large-v3 shares the same encoder),
+            // but with OpenAI's pruned turbo decoder (8 layers vs 32)
+            // for ~2× faster inference. User can swap to Fast or
+            // Accurate in Settings → Providers → Local.
+            localWhisperModel: WhisperModelCatalog.balanced.variantName
         )
     }
 }

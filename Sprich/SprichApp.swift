@@ -28,14 +28,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide from dock (belt + suspenders with LSUIElement)
         NSApp.setActivationPolicy(.accessory)
 
-        // Security: purge any legacy URLCache that may contain transcripts or
-        // keys from previous builds (pre-ephemeral-session fix).
+        // Security: purge any legacy URLCache that may contain transcripts
+        // or API keys from pre-ephemeral-session builds. `URLCache.shared`
+        // is only touched by code that uses `URLSession.shared`; all our
+        // URLSessions are ephemeral + no-cache, so this is belt-and-
+        // suspenders — but cheap and right to do.
         URLCache.shared.removeAllCachedResponses()
-        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-           let bundleID = Bundle.main.bundleIdentifier {
-            let bundleCache = caches.appendingPathComponent(bundleID, isDirectory: true)
-            try? FileManager.default.removeItem(at: bundleCache)
-        }
+
+        // IMPORTANT: we used to ALSO `removeItem(at: <Caches>/<bundleID>)`
+        // to force-delete any legacy on-disk URL cache. That was disastrous:
+        // Core ML stores its compiled-model cache under that same bundle
+        // cache directory, so nuking the whole folder every launch caused
+        // WhisperKit to recompile the 500 MB-class audio encoder from
+        // scratch every single launch (the ~500 s "pre-warm" cost Nico
+        // was hitting). SQLite even spammed `BUG IN CLIENT OF libsqlite3`
+        // errors in Console because Core ML's `.db` was yanked out mid-use.
+        //
+        // The programmatic URLCache purge above is sufficient for the
+        // legacy-cache concern; if some old build ever left a Cache.db on
+        // disk it's inert now because our sessions don't use URLCache at
+        // all. Do NOT reintroduce a blanket bundle-cache wipe without a
+        // surgical alternative (only touch `Cache.db*`, leave Core ML
+        // and WhisperKit's dirs alone).
 
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)
@@ -66,6 +80,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.handleOnboardingComplete()
         }
+
+        // Background-preload the on-device Whisper model when the user has
+        // Local selected AND the model is already downloaded. We never
+        // auto-download on launch — the ~626 MB is opt-in in Settings.
+        prewarmLocalWhisperIfReady()
+    }
+
+    /// Kick off Core ML load of the local Whisper pipe in the background,
+    /// so the first hotkey press doesn't pay the 10-30 s load cost.
+    /// Only fires when Local is already the active provider — switching
+    /// to Local mid-session triggers its own prewarm from SettingsView.
+    private func prewarmLocalWhisperIfReady() {
+        guard appState.settings.sttProvider.isLocal else { return }
+        TranscriptionService.prewarmLocalWhisperIfReady(
+            model: appState.settings.localWhisperModel
+        )
     }
 
     private func handleOnboardingComplete() {
@@ -209,21 +239,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Language submenu
+        // Language submenu — mirrors `AppLanguages.all` so the menubar
+        // surfaces every language the Settings picker does. Previous
+        // version hard-coded Auto / Deutsch / English and drifted out
+        // of sync when the 15-language dropdown shipped in 4e1dc68.
         let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
-        let autoLang = NSMenuItem(title: "Auto-detect", action: #selector(setLanguageAuto), keyEquivalent: "")
-        autoLang.target = self
-        autoLang.state = appState.settings.preferredLanguage == nil ? .on : .off
-        langMenu.addItem(autoLang)
-        let deLang = NSMenuItem(title: "Deutsch", action: #selector(setLanguageDE), keyEquivalent: "")
-        deLang.target = self
-        deLang.state = appState.settings.preferredLanguage == "de" ? .on : .off
-        langMenu.addItem(deLang)
-        let enLang = NSMenuItem(title: "English", action: #selector(setLanguageEN), keyEquivalent: "")
-        enLang.target = self
-        enLang.state = appState.settings.preferredLanguage == "en" ? .on : .off
-        langMenu.addItem(enLang)
+        let current = appState.settings.preferredLanguage
+        for lang in AppLanguages.all {
+            let title = lang.displayName
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(setLanguageFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            // Use `representedObject` to carry the ISO code (or nil for
+            // auto-detect) through AppKit's single-selector action API.
+            item.representedObject = lang.code
+            item.state = (lang.code == current) ? .on : .off
+            langMenu.addItem(item)
+        }
         langItem.submenu = langMenu
         menu.addItem(langItem)
 
@@ -256,6 +292,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         helpItem.target = self
         menu.addItem(helpItem)
 
+        // Run onboarding again — useful for users who skipped it or
+        // missed a permission prompt, and for dev testing of the
+        // fresh-install flow without wiping UserDefaults.
+        let onboardItem = NSMenuItem(
+            title: "Run First-Time Setup…",
+            action: #selector(replayOnboarding),
+            keyEquivalent: ""
+        )
+        onboardItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Run first-time setup")
+        onboardItem.target = self
+        menu.addItem(onboardItem)
+
         // Settings
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -269,6 +317,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.menu = menu
         menu.delegate = self
 
+        // Also watch pipe-ready changes so the header flips from
+        // "Loading Whisper…" → "Ready" the moment WhisperKit finishes
+        // warming, without waiting for the next status event.
+        WhisperModelManager.shared.$isPipeReady
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshMenuHeaderForCurrentStatus()
+            }
+            .store(in: &appState.cancellables)
+
         // Observe status to update menu header
         appState.$status
             .receive(on: DispatchQueue.main)
@@ -276,7 +334,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let menuItem = self?.statusItem?.menu?.item(withTag: 100) else { return }
                 switch status {
                 case .ready:
-                    menuItem.title = "Sprich — Ready"
+                    // Differentiate between truly ready and "model
+                    // bytes on disk but pipe still warming" — see
+                    // WhisperModelManager.isPipeReady for the gap.
+                    let provider = self?.appState.settings.sttProvider ?? .groq
+                    if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
+                        menuItem.title = "Sprich — Loading Whisper…"
+                    } else {
+                        menuItem.title = "Sprich — Ready"
+                    }
                 case .recording(let mode):
                     menuItem.title = "Sprich — Recording (\(mode.displayName))..."
                 case .processing:
@@ -331,11 +397,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkeys() {
         hotkeyManager = HotkeyManager { [weak self] mode in
             guard let self = self else { return }
+            #if DEBUG
+            print("[Sprich][Hotkey] ACTIVATE \(mode.displayName)")
+            #endif
             Task { @MainActor in
                 await self.pipeline.toggle(mode: mode)
             }
         } onRelease: { [weak self] in
             guard let self = self else { return }
+            #if DEBUG
+            print("[Sprich][Hotkey] RELEASE → calling stopAndProcess")
+            #endif
             Task { @MainActor in
                 await self.pipeline.stopAndProcess()
             }
@@ -379,19 +451,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    @objc private func setLanguageAuto() {
-        appState.settings.preferredLanguage = nil
+    /// Unified language-switch handler for the menubar submenu.
+    /// `representedObject` is the ISO 639-1 code (e.g. "de"), or `nil` for
+    /// Auto-detect. Checkmarks are refreshed live by `menuWillOpen`.
+    @objc private func setLanguageFromMenu(_ sender: NSMenuItem) {
+        let code = sender.representedObject as? String
+        appState.settings.preferredLanguage = code
         appState.saveSettings()
     }
 
-    @objc private func setLanguageDE() {
-        appState.settings.preferredLanguage = "de"
-        appState.saveSettings()
+    /// Re-derive the menubar header title from the current app+pipe
+    /// state. Called when pipe-ready flips without a status change.
+    private func refreshMenuHeaderForCurrentStatus() {
+        guard let menuItem = statusItem?.menu?.item(withTag: 100) else { return }
+        switch appState.status {
+        case .ready:
+            let provider = appState.settings.sttProvider
+            if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
+                menuItem.title = "Sprich — Loading Whisper…"
+            } else {
+                menuItem.title = "Sprich — Ready"
+            }
+        case .recording(let mode):
+            menuItem.title = "Sprich — Recording (\(mode.displayName))..."
+        case .processing:
+            menuItem.title = "Sprich — Processing..."
+        case .error(let msg):
+            menuItem.title = "Sprich — Error: \(msg)"
+        }
     }
 
-    @objc private func setLanguageEN() {
-        appState.settings.preferredLanguage = "en"
-        appState.saveSettings()
+    /// Clear the "onboarded" flag and show the onboarding window again.
+    /// Useful for users who skipped a permission prompt, and for dev
+    /// testing the fresh-install flow without a full `defaults delete`.
+    @objc private func replayOnboarding() {
+        UserDefaults.standard.removeObject(forKey: "sprich.hasCompletedOnboarding")
+        DispatchQueue.main.async { [weak self] in
+            self?.showOnboardingWindow()
+        }
     }
 
     // MARK: - Accessibility diagnostic + restart
@@ -454,16 +551,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     nonisolated func menuWillOpen(_ menu: NSMenu) {
-        // Called just before the status menu appears — refresh the AX indicator.
+        // Called just before the status menu appears. Refresh any items
+        // whose state depends on live app state: accessibility grant,
+        // and the Language submenu checkmarks.
         DispatchQueue.main.async { [weak self] in
-            guard let axItem = menu.item(withTag: 200) else { return }
-            let granted = Permissions.isAccessibilityGranted()
-            if granted {
-                axItem.title = "Accessibility: ✅ Granted"
-            } else {
-                axItem.title = "Accessibility: ❌ Not granted — click to fix"
+            guard let self else { return }
+
+            if let axItem = menu.item(withTag: 200) {
+                let granted = Permissions.isAccessibilityGranted()
+                axItem.title = granted
+                    ? "Accessibility: ✅ Granted"
+                    : "Accessibility: ❌ Not granted — click to fix"
             }
-            _ = self // keep capture valid
+
+            // Sync Language submenu checkmarks to the current preference.
+            // Needed because the user can change language from anywhere —
+            // Settings picker, another menubar open — and we don't want
+            // stale ticks.
+            for item in menu.items {
+                guard let submenu = item.submenu else { continue }
+                let current = self.appState.settings.preferredLanguage
+                for langItem in submenu.items {
+                    let code = langItem.representedObject as? String
+                    langItem.state = (code == current) ? .on : .off
+                }
+            }
         }
     }
 }

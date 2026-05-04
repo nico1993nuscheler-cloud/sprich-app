@@ -18,6 +18,10 @@ struct SettingsView: View {
     @State private var newGlossaryFrom = ""
     @State private var newGlossaryTo = ""
 
+    // Local Whisper model download sheet
+    @State private var showModelDownload = false
+    @ObservedObject private var whisperManager = WhisperModelManager.shared
+
     var body: some View {
         TabView {
             apiKeysTab
@@ -36,9 +40,226 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gear") }
         }
         .frame(width: 620, height: 620)
-        .onAppear(perform: loadKeys)
+        .onAppear {
+            loadKeys()
+            whisperManager.refreshState(for: appState.settings.localWhisperModel)
+        }
         .alert("Settings Saved", isPresented: $showSavedAlert) {
             Button("OK", role: .cancel) {}
+        }
+        .sheet(isPresented: $showModelDownload) {
+            ModelDownloadView(
+                model: appState.settings.localWhisperModel,
+                onDone: {
+                    showModelDownload = false
+                    // Download just finished — warm the pipe in the
+                    // background so the first dictation after this
+                    // doesn't pay the ~10-30 s Core ML first-compile
+                    // cost on the hotkey's release path.
+                    TranscriptionService.prewarmLocalWhisperIfReady(
+                        model: appState.settings.localWhisperModel
+                    )
+                },
+                onCancel: {
+                    showModelDownload = false
+                    // If the user abandons the download, flip the provider
+                    // back to Groq so a hotkey press doesn't dead-end.
+                    if appState.settings.sttProvider.isLocal {
+                        appState.settings.sttProvider = .groq
+                        appState.saveSettings()
+                    }
+                }
+            )
+        }
+    }
+
+    // MARK: - Local Whisper status row
+
+    @ViewBuilder
+    private var localWhisperStatus: some View {
+        let modelName = appState.settings.localWhisperModel
+
+        VStack(alignment: .leading, spacing: 10) {
+
+            // Model tier picker. Lets the user trade speed for accuracy
+            // without leaving Settings. Switching to a different variant
+            // flips the local state to reflect that model's on-disk
+            // presence — typically `.absent`, which surfaces the warning
+            // banner and Download button below.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Whisper model")
+                    .font(.caption).foregroundColor(.secondary)
+
+                Picker("", selection: Binding(
+                    get: { appState.settings.localWhisperModel },
+                    set: { newValue in
+                        appState.settings.localWhisperModel = newValue
+                        appState.saveSettings()
+                        whisperManager.refreshState(for: newValue)
+                        // Warm the pipe for the newly-selected model if
+                        // it's already on disk. If not, the warning
+                        // banner routes the user to Download.
+                        TranscriptionService.prewarmLocalWhisperIfReady(model: newValue)
+                    }
+                )) {
+                    ForEach(WhisperModelCatalog.all) { option in
+                        Text(option.displayName).tag(option.variantName)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+
+                if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                    Text(option.subtitle)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: statusIconName)
+                    .foregroundStyle(statusIconColor)
+                    .font(.system(size: 16))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(modelName)
+                        .font(.system(.caption, design: .monospaced))
+                    Text(statusSubline)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                switch whisperManager.state {
+                case .ready:
+                    Button("Delete") {
+                        try? whisperManager.deleteModel(modelName)
+                    }
+                    .controlSize(.small)
+                case .downloading:
+                    Button("Cancel") { whisperManager.cancelDownload() }
+                        .controlSize(.small)
+                case .preparing:
+                    ProgressView().controlSize(.small)
+                default:
+                    Button("Download") { showModelDownload = true }
+                        .controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+
+            // Explicit warning when the user has picked Local but the
+            // model isn't downloaded yet — a green-checkmark UI led the
+            // previous tester to think they were good to go and the
+            // first hotkey silently failed.
+            if shouldShowMissingModelWarning {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Local dictation won't work until the model is downloaded.")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(missingModelCallToAction)
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.orange.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5)
+                )
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(localStatusBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(localStatusBorder, lineWidth: 0.5)
+        )
+    }
+
+    /// Warning background when the user's staring at a non-functional
+    /// Local provider selection; neutral otherwise.
+    private var localStatusBackground: Color {
+        shouldShowMissingModelWarning
+            ? Color.orange.opacity(0.06)
+            : Color.secondary.opacity(0.08)
+    }
+
+    private var localStatusBorder: Color {
+        shouldShowMissingModelWarning
+            ? Color.orange.opacity(0.3)
+            : Color.clear
+    }
+
+    private var shouldShowMissingModelWarning: Bool {
+        switch whisperManager.state {
+        case .ready, .downloading, .preparing: return false
+        case .absent, .unknown, .failed: return true
+        }
+    }
+
+    /// "~216 MB, one-time." / "~632 MB, one-time." etc, driven by the
+    /// currently-selected model's catalog entry.
+    private var missingModelCallToAction: String {
+        if let option = WhisperModelCatalog.option(
+            for: appState.settings.localWhisperModel
+        ) {
+            return "Click Download above. ~\(option.approxSizeMB) MB, one-time."
+        }
+        return "Click Download above."
+    }
+
+    private var statusIconName: String {
+        switch whisperManager.state {
+        case .ready: return "checkmark.circle.fill"
+        case .downloading: return "arrow.down.circle"
+        case .preparing: return "gearshape.2"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .absent, .unknown: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var statusIconColor: Color {
+        switch whisperManager.state {
+        case .ready: return .green
+        case .failed, .absent, .unknown: return .orange
+        default: return .secondary
+        }
+    }
+
+    private var statusSubline: String {
+        switch whisperManager.state {
+        case .ready(_, let size):
+            let fmt = ByteCountFormatter(); fmt.countStyle = .file
+            let sizeStr = fmt.string(fromByteCount: size)
+            // .ready means bytes on disk. If the pipe hasn't warmed yet
+            // the user needs to know — otherwise a hotkey press blocks
+            // on a load they can't see. The flag flips to true when
+            // LocalWhisperService finishes constructing WhisperKit.
+            if whisperManager.isPipeReady {
+                return "Ready · \(sizeStr) on disk"
+            } else {
+                return "Loading Core ML model… · \(sizeStr) on disk"
+            }
+        case .downloading(let p):
+            return "Downloading \(Int(p * 100))%"
+        case .preparing:
+            return "Preparing (Core ML compile)…"
+        case .failed(let msg):
+            return msg
+        case .absent, .unknown:
+            return "Not downloaded — dictation will not work"
         }
     }
 
@@ -205,9 +426,25 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
+                    .onChange(of: appState.settings.sttProvider) { _, newValue in
+                        // Keep the reachability read current so the warning
+                        // banner reflects disk state, not a stale cache.
+                        whisperManager.refreshState(
+                            for: appState.settings.localWhisperModel
+                        )
+                        guard newValue.isLocal else { return }
+                        // Warm the pipe in the background if the model is
+                        // already on disk — makes the first dictation after
+                        // provider switch fast instead of 10-30 s slow.
+                        TranscriptionService.prewarmLocalWhisperIfReady(
+                            model: appState.settings.localWhisperModel
+                        )
+                    }
                     providerDescription(for: appState.settings.sttProvider)
 
-                    if !hasKey(forSTT: appState.settings.sttProvider) {
+                    if appState.settings.sttProvider.isLocal {
+                        localWhisperStatus
+                    } else if !hasKey(forSTT: appState.settings.sttProvider) {
                         missingKeyBanner(
                             providerName: appState.settings.sttProvider.displayName,
                             kind: "STT"
@@ -631,6 +868,8 @@ struct SettingsView: View {
                 Text("Standard Whisper API (~$0.006/min). Most reliable.")
             case .deepgram:
                 Text("Nova-3 model (~$0.008/min). Excellent real-time performance.")
+            case .local:
+                Text("Runs fully on-device with WhisperKit — no network, no API key. Pick a tier below.")
             }
         }
         .font(.caption)
@@ -642,6 +881,9 @@ struct SettingsView: View {
     private func hasKey(forSTT provider: STTProviderType) -> Bool {
         // Re-read from Keychain each body re-eval; cheap and always current.
         _ = groqKey; _ = openAIKey; _ = deepgramKey  // force dependency on @State
+        // Local provider needs a downloaded model, not an API key —
+        // treat as "has key" so the missing-key banner doesn't fire.
+        if provider.isLocal { return true }
         guard let v = KeychainManager.retrieve(key: provider.keychainKey) else { return false }
         return !v.isEmpty
     }

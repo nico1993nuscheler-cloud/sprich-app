@@ -1,7 +1,8 @@
 import Foundation
 
 /// Multi-provider Speech-to-Text service.
-/// Supports Groq Whisper, OpenAI Whisper, and Deepgram Nova-3.
+/// Supports Groq Whisper, OpenAI Whisper, Deepgram Nova-3, and local
+/// on-device Whisper (via WhisperKit).
 class TranscriptionService {
 
     /// Ephemeral session — no on-disk URL cache, no cookies, no credential storage.
@@ -16,6 +17,39 @@ class TranscriptionService {
         return URLSession(configuration: cfg)
     }()
 
+    /// Shared on-device Whisper pipe. Load is expensive (~10–30 s first
+    /// time), so we keep one instance for the lifetime of the process.
+    static let localWhisper = LocalWhisperService()
+
+    /// Kick off a background warm-load of the local Whisper pipe for
+    /// `model` if the model is already downloaded. No-op if the model
+    /// is missing. Safe to call repeatedly — `LocalWhisperService`
+    /// dedupes overlapping loads onto a single task.
+    ///
+    /// Called from: app launch, provider switch to `.local`, download
+    /// completion, and as a defensive kick at hotkey-press time. That
+    /// way by the time the user releases the hotkey, the pipe is
+    /// usually warm — and if not, `transcribe` awaits the in-flight
+    /// load instead of failing.
+    @MainActor
+    static func prewarmLocalWhisperIfReady(model: String) {
+        let manager = WhisperModelManager.shared
+        manager.refreshState(for: model)
+        guard let folder = manager.existingFolder(for: model) else { return }
+        Task.detached(priority: .userInitiated) {
+            do {
+                try await Self.localWhisper.prewarm(model: model, modelFolder: folder)
+                #if DEBUG
+                print("[Sprich] Local Whisper warm (\(model))")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Sprich] Local Whisper warm failed: \(error)")
+                #endif
+            }
+        }
+    }
+
     /// Transcribe audio data using the configured STT provider.
     func transcribe(
         audioData: Data,
@@ -23,6 +57,15 @@ class TranscriptionService {
         language: String? = nil,
         prompt: String? = nil
     ) async throws -> String {
+        // Local STT runs entirely on-device and takes no API key — route
+        // it before the key guard so .local doesn't trip `missingAPIKey`.
+        if provider == .local {
+            return try await Self.localWhisper.transcribe(
+                audioData: audioData,
+                language: language
+            )
+        }
+
         guard let apiKey = KeychainManager.retrieve(key: provider.keychainKey) else {
             throw SprichError.missingAPIKey(provider.displayName)
         }
@@ -45,6 +88,9 @@ class TranscriptionService {
                 language: language,
                 prompt: prompt
             )
+        case .local:
+            // Unreachable — handled above before the keychain guard.
+            throw SprichError.apiError(-1, "local path not routed correctly")
         }
     }
 
