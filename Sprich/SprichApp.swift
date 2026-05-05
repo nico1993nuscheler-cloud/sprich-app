@@ -238,7 +238,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Sign in to Sprich"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 460, height: 540))
+        window.setContentSize(NSSize(width: 420, height: 560))
         window.center()
         window.isReleasedWhenClosed = false
         NSApp.activate(ignoringOtherApps: true)
