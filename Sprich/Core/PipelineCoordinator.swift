@@ -108,6 +108,14 @@ class PipelineCoordinator {
         #if DEBUG
         print("[Sprich] startRecording(\(mode.displayName)) — status=\(appState.status)")
         #endif
+
+        // Trial / license gate (P1-PRD-08). Hard-lock per D4 — no
+        // degraded mode at expiry, just point the user at the buy flow.
+        if !TrialState.shared.isEntitled {
+            await handleTrialBlocked()
+            return
+        }
+
         if !Permissions.isMicrophoneGranted() {
             let granted = await Permissions.requestMicrophone()
             if !granted {
@@ -468,6 +476,38 @@ class PipelineCoordinator {
         currentMode = nil
         appState.status = .ready
         RecordingOverlayController.shared.dismiss()
+    }
+
+    /// Gate path when the trial is expired or the user isn't signed in.
+    /// We surface a blocking error AND raise the appropriate window
+    /// (sign-in vs. trial-expired) so the next click is purposeful.
+    private func handleTrialBlocked() async {
+        let entitlement = TrialState.shared.entitlement
+        let title: String
+        let body: String
+        switch entitlement {
+        case .signedOut, .unknown:
+            title = "Sprich needs you to sign in"
+            body = "Sign in with your email to start your 7-day free trial. Open the menubar icon → Account."
+        case .trialExpired:
+            title = "Your 7-day Sprich trial has ended"
+            body = "Buy a lifetime license at sprichapp.com/pricing to keep dictating. The buy window just opened."
+        case .trialActive, .licensed:
+            // Should not reach here; isEntitled returned false but the
+            // enum says active — recompute by attempting validation
+            // and let the user retry.
+            await TrialState.shared.validateNow()
+            return
+        }
+        surfaceBlockingError(title: title, body: body)
+
+        await MainActor.run {
+            if let delegate = NSApp.delegate as? AppDelegate {
+                if entitlement == .trialExpired {
+                    delegate.showTrialLockWindow()
+                }
+            }
+        }
     }
 
     // MARK: - Error surfacing

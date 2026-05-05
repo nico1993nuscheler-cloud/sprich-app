@@ -37,6 +37,12 @@
 		A10000028 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* NetworkReachability.swift */; };
 		A10000029 /* WhisperModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000031 /* WhisperModelCatalog.swift */; };
 		A10000030 /* ModeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000032 /* ModeTokens.swift */; };
+		A10000031 /* SupabaseConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000033 /* SupabaseConfig.swift */; };
+		A10000032 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000034 /* AuthService.swift */; };
+		A10000033 /* DeviceFingerprint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000035 /* DeviceFingerprint.swift */; };
+		A10000034 /* TrialState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000036 /* TrialState.swift */; };
+		A10000035 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000037 /* SignInView.swift */; };
+		A10000036 /* TrialLockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000038 /* TrialLockView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -72,6 +78,12 @@
 		B10000030 /* NetworkReachability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkReachability.swift; sourceTree = "<group>"; };
 		B10000031 /* WhisperModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperModelCatalog.swift; sourceTree = "<group>"; };
 		B10000032 /* ModeTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeTokens.swift; sourceTree = "<group>"; };
+		B10000033 /* SupabaseConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseConfig.swift; sourceTree = "<group>"; };
+		B10000034 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		B10000035 /* DeviceFingerprint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFingerprint.swift; sourceTree = "<group>"; };
+		B10000036 /* TrialState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialState.swift; sourceTree = "<group>"; };
+		B10000037 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+		B10000038 /* TrialLockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialLockView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -124,8 +136,28 @@
 				B10000025 /* SurfaceDetector.swift */,
 				B10000030 /* NetworkReachability.swift */,
 				D10000009 /* ASR */,
+				D10000010 /* Auth */,
+				D10000011 /* Trial */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		D10000010 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				B10000033 /* SupabaseConfig.swift */,
+				B10000034 /* AuthService.swift */,
+				B10000035 /* DeviceFingerprint.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		D10000011 /* Trial */ = {
+			isa = PBXGroup;
+			children = (
+				B10000036 /* TrialState.swift */,
+			);
+			path = Trial;
 			sourceTree = "<group>";
 		};
 		D10000004 /* Models */ = {
@@ -157,6 +189,8 @@
 				B10000023 /* ShortcutHelpView.swift */,
 				B10000021 /* RecordingOverlay.swift */,
 				B10000029 /* ModelDownloadView.swift */,
+				B10000037 /* SignInView.swift */,
+				B10000038 /* TrialLockView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -283,6 +317,12 @@
 				A10000026 /* ModelDownloadView.swift in Sources */,
 				A10000028 /* NetworkReachability.swift in Sources */,
 				A10000029 /* WhisperModelCatalog.swift in Sources */,
+				A10000031 /* SupabaseConfig.swift in Sources */,
+				A10000032 /* AuthService.swift in Sources */,
+				A10000033 /* DeviceFingerprint.swift in Sources */,
+				A10000034 /* TrialState.swift in Sources */,
+				A10000035 /* SignInView.swift in Sources */,
+				A10000036 /* TrialLockView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
