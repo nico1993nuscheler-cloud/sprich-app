@@ -36,5 +36,22 @@
         <key>NSAllowsArbitraryLoads</key>
         <false/>
     </dict>
+    <!--
+        Custom URL scheme for the magic-link callback. Supabase redirects
+        the verified magic-link to `sprich://auth/callback#access_token=…`
+        and macOS routes the URL to Sprich via this registration. Handler
+        lives in AppDelegate.application(_:open:) → AuthService.handleDeepLink.
+    -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.niconuscheler.sprich.auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>sprich</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
