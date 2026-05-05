@@ -85,6 +85,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Local selected AND the model is already downloaded. We never
         // auto-download on launch — the ~626 MB is opt-in in Settings.
         prewarmLocalWhisperIfReady()
+
+        // Auth + trial bootstrap. If a session is already in Keychain we
+        // hit validate-trial in the background; if not, we show the
+        // sign-in window (after onboarding for first-run, immediately
+        // for repeat launches without a stored session).
+        TrialState.shared.bootstrapAfterLaunch()
+        observeAuthState()
+        let onboarded = UserDefaults.standard.bool(forKey: "sprich.hasCompletedOnboarding")
+        if !AuthService.shared.isSignedIn && onboarded {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.showSignInWindow()
+            }
+        }
+
+        // App-foreground refresh of trial state.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { @MainActor in
+                guard AuthService.shared.isSignedIn else { return }
+                await TrialState.shared.validateNow()
+            }
+        }
+    }
+
+    /// Apple Events / kAEGetURL → custom URL scheme route.
+    /// `sprich://auth/callback#access_token=…&refresh_token=…` is the
+    /// magic-link handoff.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        #if DEBUG
+        print("[Sprich][DeepLink] application(_:open:) fired with \(urls.count) url(s)")
+        for u in urls { print("[Sprich][DeepLink]   \(u.absoluteString)") }
+        #endif
+        for url in urls {
+            let handled = AuthService.shared.handleDeepLink(url: url)
+            #if DEBUG
+            print("[Sprich][DeepLink] handler returned \(handled) for \(url.absoluteString)")
+            #endif
+            if handled {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+    }
+
+    private func observeAuthState() {
+        NotificationCenter.default.addObserver(
+            forName: .sprichAuthStateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            // Close sign-in window on successful sign-in.
+            if AuthService.shared.isSignedIn {
+                self.signInWindow?.close()
+                self.signInWindow = nil
+            } else {
+                self.showSignInWindow()
+            }
+        }
     }
 
     /// Kick off Core ML load of the local Whisper pipe in the background,
@@ -101,6 +162,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleOnboardingComplete() {
         onboardingWindow?.close()
         onboardingWindow = nil
+
+        // Onboarding doesn't include a sign-in step yet (Sprint 2C will
+        // fold auth into onboarding proper). For now, finishing onboarding
+        // is the cue to surface the sign-in window so the user lands in
+        // a coherent next step instead of a silent app.
+        if !AuthService.shared.isSignedIn {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.showSignInWindow()
+            }
+        }
 
         // Re-start hotkey manager now that Accessibility permission should exist.
         hotkeyManager?.stop()
@@ -154,6 +225,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var helpWindow: NSWindow?
+    private var signInWindow: NSWindow?
+    private var trialLockWindow: NSWindow?
+
+    private func showSignInWindow() {
+        if let win = signInWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKeyAndOrderFront(nil)
+            return
+        }
+        let hosting = NSHostingController(rootView: SignInView())
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Sign in to Sprich"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 540))
+        window.center()
+        window.isReleasedWhenClosed = false
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        self.signInWindow = window
+    }
+
+    @MainActor
+    func showTrialLockWindow() {
+        if let win = trialLockWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKeyAndOrderFront(nil)
+            return
+        }
+        let hosting = NSHostingController(rootView: TrialLockView())
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Sprich — Trial expired"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 280))
+        window.center()
+        window.isReleasedWhenClosed = false
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        self.trialLockWindow = window
+    }
 
     private func showShortcutHelpWindow() {
         if let win = helpWindow {
@@ -304,6 +414,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         onboardItem.target = self
         menu.addItem(onboardItem)
 
+        menu.addItem(NSMenuItem.separator())
+
+        // Account section. Title is rebuilt live in `menuWillOpen` to
+        // reflect current sign-in state + trial countdown.
+        let accountItem = NSMenuItem(
+            title: "Account",
+            action: #selector(handleAccountClick),
+            keyEquivalent: ""
+        )
+        accountItem.tag = 300
+        accountItem.target = self
+        menu.addItem(accountItem)
+
+        let signOutItem = NSMenuItem(
+            title: "Sign out",
+            action: #selector(handleSignOutClick),
+            keyEquivalent: ""
+        )
+        signOutItem.tag = 301
+        signOutItem.target = self
+        menu.addItem(signOutItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Settings
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -451,6 +585,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    @objc private func handleAccountClick() {
+        if AuthService.shared.isSignedIn {
+            // Already signed in — surface trial state. If expired, show
+            // the buy modal; otherwise show the sign-in window so the
+            // user can see the current account address (and sign out).
+            switch TrialState.shared.entitlement {
+            case .trialExpired:
+                showTrialLockWindow()
+            default:
+                showSignInWindow()
+            }
+        } else {
+            showSignInWindow()
+        }
+    }
+
+    @objc private func handleSignOutClick() {
+        guard AuthService.shared.isSignedIn else { return }
+        let alert = NSAlert()
+        alert.messageText = "Sign out of Sprich?"
+        alert.informativeText = "Your trial state stays linked to your email — signing back in restores access."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Sign out")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            AuthService.shared.signOut()
+        }
+    }
+
     /// Unified language-switch handler for the menubar submenu.
     /// `representedObject` is the ISO 639-1 code (e.g. "de"), or `nil` for
     /// Auto-detect. Checkmarks are refreshed live by `menuWillOpen`.
@@ -562,6 +726,27 @@ extension AppDelegate: NSMenuDelegate {
                 axItem.title = granted
                     ? "Accessibility: ✅ Granted"
                     : "Accessibility: ❌ Not granted — click to fix"
+            }
+
+            // Account / Sign-out labels reflect live auth + trial state.
+            if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
+                let auth = AuthService.shared
+                let trial = TrialState.shared
+                if let email = auth.currentUserEmail, !email.isEmpty {
+                    let suffix: String
+                    switch trial.entitlement {
+                    case .licensed: suffix = "lifetime"
+                    case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
+                    case .trialExpired: suffix = "trial expired — buy"
+                    case .unknown: suffix = "trial · syncing…"
+                    case .signedOut: suffix = "—"
+                    }
+                    acct.title = "\(email)  ·  \(suffix)"
+                    signOut.isHidden = false
+                } else {
+                    acct.title = "Sign in to start trial…"
+                    signOut.isHidden = true
+                }
             }
 
             // Sync Language submenu checkmarks to the current preference.
