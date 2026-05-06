@@ -236,51 +236,19 @@ private struct ProviderButton: View {
 
 // MARK: - Google G mark
 //
-// Proper Google brand "G": a 4-color partial ring with a horizontal blue
-// bar entering from the right. Drawn with Canvas so it scales cleanly.
+// Official Google "G" brand mark, loaded from Assets.xcassets as a
+// vector SVG (Contents.json: preserves-vector-representation = true).
+// The asset scales cleanly at any button size without rasterizing.
+//
+// The earlier Canvas-drawn version got the arc geometry wrong — easier
+// and more accurate to ship the canonical SVG that Google publishes for
+// Sign-in flows in their brand guidelines.
 private struct GoogleGMark: View {
-    private let blue = Color(red: 66/255, green: 133/255, blue: 244/255)
-    private let green = Color(red: 52/255, green: 168/255, blue: 83/255)
-    private let yellow = Color(red: 251/255, green: 188/255, blue: 5/255)
-    private let red = Color(red: 234/255, green: 67/255, blue: 53/255)
-
     var body: some View {
-        Canvas { ctx, size in
-            let s = min(size.width, size.height)
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            let outer = s * 0.50
-            let inner = s * 0.30
-
-            func annular(start: Double, end: Double, color: Color) {
-                var p = Path()
-                p.addArc(center: center, radius: outer,
-                         startAngle: .degrees(start), endAngle: .degrees(end),
-                         clockwise: false)
-                p.addArc(center: center, radius: inner,
-                         startAngle: .degrees(end), endAngle: .degrees(start),
-                         clockwise: true)
-                p.closeSubpath()
-                ctx.fill(p, with: .color(color))
-            }
-
-            // Arc layout (SwiftUI angles: 0° = right, 90° = down, clockwise).
-            // Angles chosen to roughly match Google's official mark — the
-            // ring opens at the right where the horizontal bar enters.
-            annular(start: -65, end:  20, color: red)     // top-right shoulder
-            annular(start:  20, end: 100, color: yellow)  // bottom-right
-            annular(start: 100, end: 200, color: green)   // bottom-left
-            annular(start: 200, end: 295, color: blue)    // left → top
-
-            // Horizontal blue bar — the "G" crossbar that enters from the
-            // right and stops at center.
-            let barHeight = s * 0.18
-            let barY = center.y - barHeight / 2
-            let barX = center.x
-            let barW = outer
-            var bar = Path()
-            bar.addRect(CGRect(x: barX, y: barY, width: barW, height: barHeight))
-            ctx.fill(bar, with: .color(blue))
-        }
+        Image("GoogleG")
+            .resizable()
+            .renderingMode(.original)
+            .aspectRatio(contentMode: .fit)
     }
 }
 
