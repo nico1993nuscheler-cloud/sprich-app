@@ -64,7 +64,15 @@ struct SignInView: View {
 
     private var providerButtons: some View {
         VStack(spacing: 10) {
-            ForEach(AuthService.OAuthProvider.allCases) { provider in
+            // Microsoft is intentionally hidden for Phase 1 (Sprint 2B):
+            // Microsoft now blocks personal-account consent for multi-tenant
+            // apps without a verified Microsoft Partner publisher (a paid,
+            // multi-week verification flow). Phase 2's M365 Business
+            // subscription unlocks this cleanly — keeping the case in
+            // OAuthProvider so the Mac-side wiring stays intact, just not
+            // surfacing the button until then.
+            let visible = AuthService.OAuthProvider.allCases.filter { $0 != .azure }
+            ForEach(visible) { provider in
                 ProviderButton(provider: provider) {
                     auth.signInWithOAuth(provider: provider)
                 }

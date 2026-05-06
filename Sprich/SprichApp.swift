@@ -338,6 +338,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusItem)
         menu.addItem(NSMenuItem.separator())
 
+        // Account section — placed near the top for visibility. Title +
+        // styling are rebuilt live in `menuWillOpen` to reflect current
+        // sign-in state + trial countdown. When signed out, the row is
+        // styled bold with a sparkles icon to draw the user toward the
+        // sign-in flow.
+        let accountItem = NSMenuItem(
+            title: "Sign in to start trial…",
+            action: #selector(handleAccountClick),
+            keyEquivalent: ""
+        )
+        accountItem.tag = 300
+        accountItem.target = self
+        menu.addItem(accountItem)
+
+        let signOutItem = NSMenuItem(
+            title: "Sign out",
+            action: #selector(handleSignOutClick),
+            keyEquivalent: ""
+        )
+        signOutItem.tag = 301
+        signOutItem.target = self
+        menu.addItem(signOutItem)
+
+        menu.addItem(NSMenuItem.separator())
+
         // Mode indicators
         let literalItem = NSMenuItem(title: "Literal (Fn+Shift)", action: nil, keyEquivalent: "")
         literalItem.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Literal mode")
@@ -413,28 +438,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         onboardItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Run first-time setup")
         onboardItem.target = self
         menu.addItem(onboardItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Account section. Title is rebuilt live in `menuWillOpen` to
-        // reflect current sign-in state + trial countdown.
-        let accountItem = NSMenuItem(
-            title: "Account",
-            action: #selector(handleAccountClick),
-            keyEquivalent: ""
-        )
-        accountItem.tag = 300
-        accountItem.target = self
-        menu.addItem(accountItem)
-
-        let signOutItem = NSMenuItem(
-            title: "Sign out",
-            action: #selector(handleSignOutClick),
-            keyEquivalent: ""
-        )
-        signOutItem.tag = 301
-        signOutItem.target = self
-        menu.addItem(signOutItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -729,6 +732,9 @@ extension AppDelegate: NSMenuDelegate {
             }
 
             // Account / Sign-out labels reflect live auth + trial state.
+            // When signed-out, the row is styled bold + accent-colored
+            // with a sparkles icon so it stands out as the primary call
+            // to action in the menubar.
             if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
                 let auth = AuthService.shared
                 let trial = TrialState.shared
@@ -741,10 +747,30 @@ extension AppDelegate: NSMenuDelegate {
                     case .unknown: suffix = "trial · syncing…"
                     case .signedOut: suffix = "—"
                     }
+                    acct.attributedTitle = nil
                     acct.title = "\(email)  ·  \(suffix)"
+                    acct.image = NSImage(systemSymbolName: "person.crop.circle.fill",
+                                         accessibilityDescription: "Account")
                     signOut.isHidden = false
                 } else {
-                    acct.title = "Sign in to start trial…"
+                    let title = "Sign in to start your 7-day trial"
+                    let baseFont = NSFont.menuFont(ofSize: 0)
+                    let boldFont = NSFontManager.shared
+                        .convert(baseFont, toHaveTrait: .boldFontMask)
+                    let attr = NSMutableAttributedString(
+                        string: title,
+                        attributes: [
+                            .font: boldFont,
+                            .foregroundColor: NSColor.controlAccentColor,
+                        ]
+                    )
+                    acct.attributedTitle = attr
+                    acct.title = title
+                    acct.image = NSImage(systemSymbolName: "sparkles",
+                                         accessibilityDescription: "Sign in")?
+                        .withSymbolConfiguration(
+                            NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+                        )
                     signOut.isHidden = true
                 }
             }
