@@ -21,7 +21,10 @@ struct SprichApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var statusItem: NSStatusItem!
-    private var pipeline: PipelineCoordinator!
+    /// Exposed so OnboardingView's "Try it now" step can install a
+    /// transient `interceptOutput` closure that routes the test
+    /// transcription back into the onboarding window.
+    var pipeline: PipelineCoordinator!
     private var hotkeyManager: HotkeyManager!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -163,15 +166,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow?.close()
         onboardingWindow = nil
 
-        // Onboarding doesn't include a sign-in step yet (Sprint 2C will
-        // fold auth into onboarding proper). For now, finishing onboarding
-        // is the cue to surface the sign-in window so the user lands in
-        // a coherent next step instead of a silent app.
-        if !AuthService.shared.isSignedIn {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                self?.showSignInWindow()
-            }
-        }
+        // Sprint 2C: sign-in is now the first card of onboarding, so
+        // by the time we reach this handler the user is either signed
+        // in or explicitly chose to skip. No standalone sign-in window
+        // is shown post-onboarding — the menubar account row is the
+        // re-entry point if they want to come back later.
 
         // Re-start hotkey manager now that Accessibility permission should exist.
         hotkeyManager?.stop()
@@ -206,7 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboardingWindow() {
         let hosting = NSHostingController(
-            rootView: OnboardingView()
+            rootView: OnboardingView(pipeline: pipeline)
                 .environmentObject(appState)
         )
         let window = NSWindow(contentViewController: hosting)
