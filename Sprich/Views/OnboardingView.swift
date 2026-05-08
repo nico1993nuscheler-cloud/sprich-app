@@ -10,6 +10,13 @@ import AppKit
 /// Sprint 3 P1-PRD-11 will redesign this further toward OpenWhisper's
 /// 2-card model. Sprint 2C only adds what the funnel requires.
 struct OnboardingView: View {
+    /// PipelineCoordinator passed in from AppDelegate at window creation
+    /// time — passing explicitly avoids the brittle
+    /// `(NSApp.delegate as? AppDelegate)?.pipeline` lookup which was
+    /// returning nil intermittently during onboarding scene-graph
+    /// construction.
+    let pipeline: PipelineCoordinator
+
     @EnvironmentObject var appState: AppState
     @StateObject private var auth = AuthService.shared
     @StateObject private var trial = TrialState.shared
@@ -71,6 +78,19 @@ struct OnboardingView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                     if currentStep == 0 { currentStep = 1 }
                 }
+            }
+        }
+        .onChange(of: currentStep) { newStep in
+            // Re-install the intercept hook every time the user actually
+            // enters Try-it-now (step 3). We can't rely on tryItNowStep's
+            // .onAppear alone because SwiftUI may fire it eagerly at
+            // scene-graph construction time before pipeline is ready.
+            // Clear it when leaving the step so a stray transcription
+            // doesn't bypass the focused app's paste target.
+            if newStep == 3 {
+                installInterceptHook()
+            } else {
+                clearInterceptHook()
             }
         }
     }
@@ -553,10 +573,28 @@ struct OnboardingView: View {
 
     private var tryItOutputBox: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Your dictation").font(.caption).foregroundColor(.secondary)
+            HStack(spacing: 6) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text("Your dictation will appear here")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                if capturedText.isEmpty {
+                    Text("LISTENING")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(1.4)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(
+                            Capsule().strokeBorder(Color.secondary.opacity(0.3), lineWidth: 0.5)
+                        )
+                }
+            }
             ScrollView {
                 Text(capturedText.isEmpty
-                     ? "Hold Fn+Shift, say something — the result lands here."
+                     ? "Hold Fn+Shift, say something — the transcription will land here, not in another app."
                      : capturedText)
                     .font(.system(size: 14, design: capturedText.isEmpty ? .default : .monospaced))
                     .foregroundColor(capturedText.isEmpty ? .secondary : .primary)
@@ -565,26 +603,52 @@ struct OnboardingView: View {
             }
             .frame(minHeight: 90, maxHeight: 130)
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.textBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.gray.opacity(0.2), lineWidth: 0.5))
+            // Cream-alt-like fill so it reads as a "transcript readout"
+            // rather than an editable text field. Dashed border underlines
+            // that this isn't a click-and-type input.
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.gray.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        Color.gray.opacity(0.25),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            )
+            // Disable hit testing so clicks don't even register a focus
+            // attempt — fewer false signals to the user that this is
+            // editable.
+            .allowsHitTesting(false)
         }
     }
 
     private func installInterceptHook() {
-        guard let pipeline = (NSApp.delegate as? AppDelegate)?.pipeline else { return }
+        #if DEBUG
+        print("[Sprich][Onboarding] installInterceptHook: setting interceptOutput on pipeline")
+        #endif
         pipeline.interceptOutput = { text in
+            #if DEBUG
+            print("[Sprich][Onboarding] interceptOutput closure fired with \(text.count) chars: \(text.prefix(60))")
+            #endif
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
-            capturedText = trimmed
-            withAnimation(.easeOut(duration: 0.2)) { confettiActive = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeOut(duration: 0.5)) { confettiActive = false }
+            DispatchQueue.main.async {
+                capturedText = trimmed
+                withAnimation(.easeOut(duration: 0.2)) { confettiActive = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    withAnimation(.easeOut(duration: 0.5)) { confettiActive = false }
+                }
             }
         }
     }
 
     private func clearInterceptHook() {
-        (NSApp.delegate as? AppDelegate)?.pipeline?.interceptOutput = nil
+        #if DEBUG
+        print("[Sprich][Onboarding] clearInterceptHook: zeroing interceptOutput")
+        #endif
+        pipeline.interceptOutput = nil
     }
 
     private func keycap(symbol: String, label: String) -> some View {

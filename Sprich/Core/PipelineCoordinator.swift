@@ -38,9 +38,15 @@ class PipelineCoordinator {
     /// `interceptOutput` if set; otherwise pastes via `TextInserter`.
     private func deliver(_ text: String) async {
         if let intercept = interceptOutput {
+            #if DEBUG
+            print("[Sprich] deliver: routing \(text.count) chars to interceptOutput")
+            #endif
             intercept(text)
             return
         }
+        #if DEBUG
+        print("[Sprich] deliver: no interceptOutput set, pasting via TextInserter (\(text.count) chars)")
+        #endif
         await TextInserter.insert(text)
     }
 

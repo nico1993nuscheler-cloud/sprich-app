@@ -205,7 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboardingWindow() {
         let hosting = NSHostingController(
-            rootView: OnboardingView()
+            rootView: OnboardingView(pipeline: pipeline)
                 .environmentObject(appState)
         )
         let window = NSWindow(contentViewController: hosting)
