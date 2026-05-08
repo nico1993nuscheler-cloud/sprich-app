@@ -43,6 +43,7 @@
 		A10000034 /* TrialState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000036 /* TrialState.swift */; };
 		A10000035 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000037 /* SignInView.swift */; };
 		A10000036 /* TrialLockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000038 /* TrialLockView.swift */; };
+		A10000037 /* SignInPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000039 /* SignInPanel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +85,7 @@
 		B10000036 /* TrialState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialState.swift; sourceTree = "<group>"; };
 		B10000037 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		B10000038 /* TrialLockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialLockView.swift; sourceTree = "<group>"; };
+		B10000039 /* SignInPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPanel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +192,7 @@
 				B10000021 /* RecordingOverlay.swift */,
 				B10000029 /* ModelDownloadView.swift */,
 				B10000037 /* SignInView.swift */,
+				B10000039 /* SignInPanel.swift */,
 				B10000038 /* TrialLockView.swift */,
 			);
 			path = Views;
@@ -322,6 +325,7 @@
 				A10000033 /* DeviceFingerprint.swift in Sources */,
 				A10000034 /* TrialState.swift in Sources */,
 				A10000035 /* SignInView.swift in Sources */,
+				A10000037 /* SignInPanel.swift in Sources */,
 				A10000036 /* TrialLockView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

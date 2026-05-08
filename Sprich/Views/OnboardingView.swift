@@ -1,23 +1,35 @@
 import SwiftUI
 import AppKit
 
+/// Sprint 2C onboarding: 4 cards.
+///   0 — Welcome + Sign in (magic-link / OAuth via SignInPanel)
+///   1 — Permissions (Accessibility + Microphone on one card)
+///   2 — Provider + Preparing Sprich (provider radio + isPipeReady strip)
+///   3 — Try it now (guided dictation test → confetti)
+///
+/// Sprint 3 P1-PRD-11 will redesign this further toward OpenWhisper's
+/// 2-card model. Sprint 2C only adds what the funnel requires.
 struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
+    @StateObject private var auth = AuthService.shared
+    @StateObject private var trial = TrialState.shared
+    @ObservedObject private var whisperManager = WhisperModelManager.shared
+
     @State private var currentStep = 0
+
     @State private var groqKey = ""
     @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
     @State private var microphoneGranted = Permissions.isMicrophoneGranted()
-    /// Provider choice on step 3. Defaults to `.local` so the recommended
-    /// path requires zero user input — clicking Continue is enough.
     @State private var providerChoice: STTProviderType = .local
-    /// Expanded state of the "Advanced — use a cloud provider" disclosure.
     @State private var cloudDisclosureExpanded = false
-    /// Drives the download-progress strip on the final step when Local
-    /// was the chosen provider.
-    @ObservedObject private var whisperManager = WhisperModelManager.shared
+
+    /// Try-it-now state: text captured via PipelineCoordinator.interceptOutput,
+    /// plus a one-shot `confettiActive` trigger.
+    @State private var capturedText: String = ""
+    @State private var confettiActive: Bool = false
 
     private let permissionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let totalSteps = 5
+    private let totalSteps = 4
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,11 +39,10 @@ struct OnboardingView: View {
 
             Group {
                 switch currentStep {
-                case 0: welcomeStep
-                case 1: accessibilityStep
-                case 2: microphoneStep
-                case 3: providerChoiceStep
-                default: finalStep
+                case 0: welcomeSignInStep
+                case 1: permissionsStep
+                case 2: providerPreparingStep
+                default: tryItNowStep
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -44,21 +55,27 @@ struct OnboardingView: View {
         .frame(width: 500, height: 600)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
-            // Seed the choice from whatever the user already has saved
-            // (so replaying onboarding via the menubar item doesn't
-            // silently reset them from Cloud back to Local).
             providerChoice = appState.settings.sttProvider
-            // If they had a cloud provider configured, open the advanced
-            // disclosure pre-expanded so they can see/edit their key.
             cloudDisclosureExpanded = !providerChoice.isLocal
         }
         .onReceive(permissionTimer) { _ in
             accessibilityGranted = Permissions.isAccessibilityGranted()
             microphoneGranted = Permissions.isMicrophoneGranted()
         }
+        .onChange(of: auth.isSignedIn) { signedIn in
+            // When the user clicks the magic-link / OAuth completes the
+            // round-trip, AuthService posts .sprichAuthStateChanged and
+            // bumps `currentSession`. Auto-advance from step 0 → 1 so
+            // the user lands in the permissions card immediately.
+            if signedIn && currentStep == 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    if currentStep == 0 { currentStep = 1 }
+                }
+            }
+        }
     }
 
-    // MARK: - Shared pieces
+    // MARK: - Shared header / progress
 
     private var header: some View {
         HStack(spacing: 14) {
@@ -94,7 +111,6 @@ struct OnboardingView: View {
         }
     }
 
-    // Skip / back / primary row — one row for every step
     private func navRow(primaryLabel: String,
                         primaryDisabled: Bool = false,
                         primary: @escaping () -> Void) -> some View {
@@ -112,174 +128,178 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Step 0 — welcome
+    // MARK: - Step 0 — Welcome + Sign in
 
-    private var welcomeStep: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Welcome").font(.title).fontWeight(.bold)
-
-            Text("Sprich turns your voice into clean text in any app — emails, chats, docs, code comments. Hold a shortcut, speak, release. Done.")
-                .foregroundColor(.secondary)
-
-            VStack(alignment: .leading, spacing: 10) {
-                bullet(
-                    icon: "bolt.fill",
-                    title: "Fast",
-                    text: "Under one second from release to pasted text."
-                )
-                bullet(
-                    icon: "lock.shield.fill",
-                    title: "Private",
-                    text: "API keys live in macOS Keychain. No telemetry. No account."
-                )
-                bullet(
-                    icon: "gift.fill",
-                    title: "Free",
-                    text: "Bring your own API keys — Groq's free tier covers typical daily use. No subscription, ever."
-                )
-            }
-            .padding(.top, 4)
-
-            Spacer()
-
-            navRow(primaryLabel: "Get Started") { currentStep = 1 }
-        }
-    }
-
-    private func bullet(icon: String, title: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon)
-                .foregroundColor(.accentColor)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(text).font(.caption).foregroundColor(.secondary)
-            }
-        }
-    }
-
-    // MARK: - Step 1 — accessibility
-
-    private var accessibilityStep: some View {
+    private var welcomeSignInStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Step 1 — Accessibility").font(.title2).fontWeight(.semibold)
+            Text("Welcome to Sprich").font(.title).fontWeight(.bold)
 
-            Text("Sprich listens for your shortcut system-wide and pastes the result into whatever app is focused. macOS requires Accessibility permission for this.")
+            Text("Turn your voice into clean text in any app — emails, chats, docs, code comments. Hold a shortcut, speak, release. Done.")
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 10) {
-                if accessibilityGranted {
-                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                    Text("Granted").font(.system(size: 13, weight: .semibold))
-                } else {
-                    Image(systemName: "xmark.circle.fill").foregroundColor(.orange)
-                    Text("Not granted yet").font(.system(size: 13, weight: .semibold))
-                }
+            if auth.isSignedIn {
+                signedInSummary
+            } else {
+                SignInPanel(showsHeader: false)
             }
 
-            if !accessibilityGranted {
-                Button("Open Accessibility Settings") {
-                    Permissions.promptAccessibility()
-                }
-                .buttonStyle(.bordered)
+            Spacer(minLength: 0)
 
-                Text("A system prompt will appear. Click **Open System Settings**, then toggle Sprich on. You may need to relaunch Sprich afterwards.")
+            HStack {
+                Spacer()
+                if auth.isSignedIn {
+                    Button("Continue") { currentStep = 1 }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Skip — sign in later") { currentStep = 1 }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+    }
+
+    private var signedInSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundColor(.green)
+                Text("Signed in as **\(auth.currentUserEmail ?? "")**")
+                    .font(.callout)
+            }
+            switch trial.entitlement {
+            case .trialActive:
+                Text("Your 7-day trial is active — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left.")
+                    .font(.caption).foregroundColor(.secondary)
+            case .licensed:
+                Text("Lifetime license attached. Welcome aboard.")
+                    .font(.caption).foregroundColor(.secondary)
+            case .unknown:
+                Text("Starting your trial…")
+                    .font(.caption).foregroundColor(.secondary)
+            case .trialExpired, .signedOut:
+                Text("Reach out to support@sprichapp.com if you don't see a trial here — we'll sort it out.")
                     .font(.caption).foregroundColor(.secondary)
             }
-
-            Spacer()
-
-            navRow(primaryLabel: accessibilityGranted ? "Continue" : "I've granted access") {
-                currentStep = 2
-            }
         }
-        .onChange(of: accessibilityGranted) { granted in
-            if granted && currentStep == 1 {
-                // Auto-advance after a short delay so the user sees the green checkmark
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    if currentStep == 1 { currentStep = 2 }
-                }
-            }
-        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.green.opacity(0.08))
+        )
     }
 
-    // MARK: - Step 2 — microphone
+    // MARK: - Step 1 — Permissions (Accessibility + Microphone combined)
 
-    private var microphoneStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Step 2 — Microphone").font(.title2).fontWeight(.semibold)
+    private var permissionsStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Permissions").font(.title2).fontWeight(.semibold)
 
-            Text("Sprich records your voice only while you're holding the shortcut. Audio is sent directly to your chosen transcription provider, never cached to disk.")
+            Text("Sprich needs two macOS permissions to listen for your shortcut and capture your voice. Audio is sent to your chosen provider only — never written to disk.")
+                .font(.callout)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 10) {
-                if microphoneGranted {
-                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                    Text("Granted").font(.system(size: 13, weight: .semibold))
-                } else {
-                    Image(systemName: "mic.slash.fill").foregroundColor(.orange)
-                    Text("Not granted yet").font(.system(size: 13, weight: .semibold))
-                }
-            }
+            permissionRow(
+                title: "Accessibility",
+                explanation: "Lets Sprich listen for your global shortcut and paste transcribed text into the focused app.",
+                granted: accessibilityGranted,
+                cta: "Open Accessibility Settings",
+                action: { Permissions.promptAccessibility() }
+            )
 
-            if !microphoneGranted {
-                Button("Grant Microphone Access") {
+            permissionRow(
+                title: "Microphone",
+                explanation: "Records audio while you hold the shortcut. Released audio is processed and discarded.",
+                granted: microphoneGranted,
+                cta: "Grant Microphone Access",
+                action: {
                     Task {
                         _ = await Permissions.requestMicrophone()
                         microphoneGranted = Permissions.isMicrophoneGranted()
                     }
                 }
-                .buttonStyle(.bordered)
-            }
+            )
 
             Spacer()
 
-            navRow(primaryLabel: "Continue") { currentStep = 3 }
-        }
-        .onChange(of: microphoneGranted) { granted in
-            if granted && currentStep == 2 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                    if currentStep == 2 { currentStep = 3 }
-                }
-            }
+            navRow(primaryLabel: "Continue") { currentStep = 2 }
         }
     }
 
-    // MARK: - Step 3 — Provider choice (Local default, cloud recommended)
+    private func permissionRow(
+        title: String,
+        explanation: String,
+        granted: Bool,
+        cta: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundColor(granted ? .green : .orange)
+                .font(.system(size: 18))
+                .padding(.top, 2)
 
-    private var providerChoiceStep: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(title).font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text(granted ? "Granted" : "Not granted")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(granted ? .green : .orange)
+                }
+                Text(explanation)
+                    .font(.caption).foregroundColor(.secondary)
+                if !granted {
+                    Button(cta, action: action)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(.top, 4)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.gray.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Step 2 — Provider + Preparing
+
+    private var providerPreparingStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Step 3 — Choose your transcription").font(.title2).fontWeight(.semibold)
+            Text("Choose your transcription").font(.title2).fontWeight(.semibold)
 
-            Text("Sprich can transcribe fully on your Mac (default) or use a cloud API (recommended for the fastest, most polished experience).")
+            Text("Sprich can transcribe fully on your Mac (default) or use a cloud API (recommended for the fastest, most polished output).")
                 .foregroundColor(.secondary)
 
-            // Local (default) card — selected by default so "just click
-            // Continue" is a valid path. Still the privacy-first option
-            // that requires no key — but we no longer label it
-            // "recommended", because for creators who want maximum speed
-            // and quality the cloud path is what we recommend.
             providerOptionCard(
                 choice: .local,
                 icon: "lock.shield.fill",
                 title: "Local (default)",
                 badge: "No account · No API key · ~\(WhisperModelCatalog.balanced.approxSizeMB) MB one-time download",
-                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Best privacy, zero per-dictation cost. Pick Balanced tier — change later in Settings."
+                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Best privacy, zero per-dictation cost."
             )
 
-            // Cloud (recommended). Collapsed by default, but the label
-            // explicitly calls out why someone would open it.
             DisclosureGroup(isExpanded: $cloudDisclosureExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("A cloud provider key unlocks two things at once: faster, more polished transcription (Groq Whisper ≈ 0.5 s round-trip) AND the AI-powered cleanup used in Formal and Custom modes. The Groq free tier is generous — typical personal use fits comfortably inside it.")
+                    Text("A cloud key unlocks faster STT and the AI cleanup used in Formal/Custom modes. Groq's free tier is generous.")
                         .font(.caption).foregroundColor(.secondary)
 
                     providerOptionCard(
                         choice: .groq,
                         icon: "bolt.fill",
                         title: "Cloud — Groq (recommended)",
-                        badge: "Free tier · typical personal use is free · powers STT + Formal cleanup",
-                        description: "Sends audio to Groq's API for transcription. Same key drives the Formal-mode AI polish, so one key gets you everything."
+                        badge: "Free tier · powers STT + Formal cleanup",
+                        description: "One key drives both transcription and Formal-mode polish."
                     )
 
                     if providerChoice == .groq {
@@ -297,9 +317,6 @@ struct OnboardingView: View {
                         }
                         .padding(.top, 4)
                     }
-
-                    Text("OpenAI, Deepgram, Claude and Gemini keys can be added anytime from Settings → API Keys.")
-                        .font(.caption).foregroundColor(.secondary).padding(.top, 2)
                 }
                 .padding(.top, 8)
             } label: {
@@ -307,91 +324,113 @@ struct OnboardingView: View {
                     .font(.system(size: 13, weight: .medium))
             }
 
-            // Heads-up only fires when the user has Local selected AND
-            // no cloud LLM key anywhere in Keychain — i.e. the exact
-            // configuration where Formal/Custom would actually fail.
-            // Users who already added a Groq key in a prior install
-            // keep Formal/Custom working with Local STT, so we stay
-            // silent for them.
-            if providerChoice == .local && !hasAnyCloudLLMKey {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundColor(.accentColor)
-                    Text("Local handles transcription. Formal and Custom modes use cloud AI cleanup — add a cloud LLM key above (or later in Settings → API Keys) to enable them. Literal mode works fully offline.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.accentColor.opacity(0.08))
-                )
+            // Inline preparing-progress strip — shows when Local is the
+            // active provider AND the model isn't already Ready. We
+            // start the download as soon as the user lands on this step
+            // so the bar climbs while they pick options.
+            if providerChoice == .local {
+                preparingStrip
             }
 
             Spacer()
 
-            HStack {
-                Button("Back") { currentStep -= 1 }
-                    .buttonStyle(.plain).foregroundColor(.secondary)
-                Spacer()
-                Button(primaryButtonTitle) {
-                    commitProviderChoice()
-                    currentStep = 4
+            navRow(
+                primaryLabel: providerPrimaryLabel,
+                primaryDisabled: providerPrimaryDisabled
+            ) {
+                commitProviderChoice()
+                currentStep = 3
+            }
+        }
+        .onChange(of: providerChoice) { choice in
+            if choice == .local {
+                let model = appState.settings.localWhisperModel
+                Task { @MainActor in
+                    try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(primaryButtonDisabled)
+            }
+        }
+        .onAppear {
+            if providerChoice == .local {
+                let model = appState.settings.localWhisperModel
+                Task { @MainActor in
+                    try? await WhisperModelManager.shared.ensureReady(model: model)
+                }
             }
         }
     }
 
-    private var primaryButtonTitle: String {
+    private var providerPrimaryLabel: String {
         switch providerChoice {
-        case .local:    return "Continue with Local"
-        case .groq:     return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
-                            ? "Continue"
-                            : "Save Key & Continue"
-        default:        return "Continue"
+        case .local:
+            return whisperManager.isPipeReady ? "Continue — Sprich is ready" : "Continue — finish in the background"
+        case .groq:
+            return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
+                ? "Continue"
+                : "Save Key & Continue"
+        default:
+            return "Continue"
         }
     }
 
-    /// Block advancing when the user selected Cloud but provided no key —
-    /// otherwise they'd land on the shortcuts screen with a broken setup.
-    private var primaryButtonDisabled: Bool {
+    private var providerPrimaryDisabled: Bool {
         if providerChoice == .groq {
             return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
         }
         return false
     }
 
-    /// True when the user has a cloud LLM key stored in Keychain for any
-    /// provider. Drives the "Formal/Custom need a cloud key" hint below
-    /// the Local card — we only nag users who'd actually be missing
-    /// Formal/Custom functionality. A user who already had Groq set up
-    /// from a previous install is silent-ok.
-    private var hasAnyCloudLLMKey: Bool {
-        let candidates: [LLMProviderType] = [.groq, .claude, .google, .openai]
-        for provider in candidates {
-            if let v = KeychainManager.retrieve(key: provider.keychainKey),
-               !v.isEmpty { return true }
+    @ViewBuilder
+    private var preparingStrip: some View {
+        switch whisperManager.state {
+        case .ready:
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                Text("Whisper is ready.")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.green.opacity(0.08)))
+        case .downloading(let p):
+            HStack(spacing: 10) {
+                ProgressView(value: p)
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 200)
+                Text("Preparing Whisper… \(Int(p * 100))%")
+                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
+                Spacer()
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+        case .preparing:
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Compiling Core ML graph (one-time, ~10–30 s)…")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+        case .failed(let msg):
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                Text("Whisper download failed: \(msg). Open Settings → Providers → Local to retry.")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+        default:
+            EmptyView()
         }
-        // Also a Groq key entered on this very screen counts.
-        return !groqKey.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Execute the side effects of the provider choice: save the STT
-    /// provider, store any entered key, and — for Local — kick off the
-    /// model download in the background so the user doesn't have to
-    /// wait on this step.
     private func commitProviderChoice() {
         appState.settings.sttProvider = providerChoice
         appState.saveSettings()
-
         switch providerChoice {
         case .local:
-            // Fire-and-forget. `WhisperModelManager` publishes progress
-            // via `state`; the final step shows a small indicator so
-            // the user knows the background download is happening.
             let model = appState.settings.localWhisperModel
             Task { @MainActor in
                 try? await WhisperModelManager.shared.ensureReady(model: model)
@@ -458,159 +497,94 @@ struct OnboardingView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Step 4 — Shortcut cheat-sheet
+    // MARK: - Step 3 — Try it now
 
-    private var finalStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Your shortcuts").font(.title2).fontWeight(.bold)
+    private var tryItNowStep: some View {
+        ZStack {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Try it now").font(.title2).fontWeight(.bold)
 
-            Text("Hold the combo, speak, release. The cleaned text is pasted into whatever app is focused.")
-                .foregroundColor(.secondary).font(.callout)
-
-            // When Local was chosen on step 3, surface the background
-            // download progress so the user knows that's why their first
-            // dictation attempt might say "still downloading".
-            if appState.settings.sttProvider.isLocal {
-                localDownloadStatusRow
-            }
-
-            VStack(spacing: 10) {
-                shortcutCard(
-                    symbols: ["globe", "shift"],
-                    labels:  ["fn",     "shift"],
-                    title:   "Literal",
-                    subtitle: "Clean transcription — fillers removed, grammar fixed.",
-                    useCases: "Chats · Notes · Code comments",
-                    accent:  Color(red: 0.35, green: 0.85, blue: 0.65)
-                )
-                shortcutCard(
-                    symbols: ["globe", "control"],
-                    labels:  ["fn",     "control"],
-                    title:   "Formal",
-                    subtitle: "Restructured into polished written language.",
-                    useCases: "Emails · Documents · Proposals",
-                    accent:  Color(red: 0.55, green: 0.45, blue: 0.95)
-                )
-                shortcutCard(
-                    symbols: ["globe", "command"],
-                    labels:  ["fn",     "cmd"],
-                    title:   "Custom",
-                    subtitle: "Your own prompt (enable in Settings).",
-                    useCases: "Slack tone · Bullet points · Any niche style",
-                    accent:  Color(red: 0.95, green: 0.65, blue: 0.35)
-                )
-            }
-
-            Spacer()
-
-            Button("Start Using Sprich") { finish() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .frame(maxWidth: .infinity)
-        }
-    }
-
-    /// Passive status strip shown on the final step when Local was the
-    /// chosen provider on step 3. Observes `WhisperModelManager.shared`
-    /// so the progress bar climbs live as the model downloads in the
-    /// background. If the model is already Ready (e.g. the user replayed
-    /// onboarding after a fresh install had already finished downloading),
-    /// we don't render anything — nothing useful to say.
-    @ViewBuilder
-    private var localDownloadStatusRow: some View {
-        switch whisperManager.state {
-        case .downloading(let p):
-            HStack(spacing: 10) {
-                ProgressView(value: p)
-                    .progressViewStyle(.linear)
-                    .frame(maxWidth: 160)
-                Text("Downloading Whisper \(Int(p * 100))%")
-                    .font(.caption)
+                Text("Hold the shortcut, say a sentence, release. Your transcription will appear right here in this window — not in another app.")
+                    .font(.callout)
                     .foregroundColor(.secondary)
-                    .monospacedDigit()
-                Spacer()
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(0.08))
-            )
-        case .preparing:
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Preparing Whisper (one-time Core ML compile, ~10–30 s)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(0.08))
-            )
-        case .failed(let msg):
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Whisper download failed")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("\(msg) — open Settings → Providers → Local to retry.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.orange.opacity(0.12))
-            )
-        default:
-            EmptyView()
-        }
-    }
 
-    private func shortcutCard(
-        symbols: [String],
-        labels: [String],
-        title: String,
-        subtitle: String,
-        useCases: String,
-        accent: Color
-    ) -> some View {
-        HStack(alignment: .center, spacing: 14) {
-            HStack(spacing: 4) {
-                ForEach(Array(zip(symbols, labels).enumerated()), id: \.offset) { idx, pair in
-                    if idx > 0 {
-                        Text("+").font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.secondary)
+                shortcutHintRow
+
+                tryItOutputBox
+
+                Spacer()
+
+                HStack {
+                    Button("Skip") { finish() }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button(capturedText.isEmpty ? "Waiting for your voice…" : "You're all set") {
+                        finish()
                     }
-                    keycap(symbol: pair.0, label: pair.1)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(capturedText.isEmpty)
                 }
             }
-            .frame(width: 128, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Circle().fill(accent).frame(width: 6, height: 6)
-                    Text(title).font(.system(size: 13, weight: .semibold))
-                }
-                Text(subtitle).font(.caption).foregroundColor(.secondary)
-                Text(useCases)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(accent.opacity(0.85))
-                    .padding(.top, 1)
+            if confettiActive {
+                ConfettiView()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
             }
+        }
+        .onAppear { installInterceptHook() }
+        .onDisappear { clearInterceptHook() }
+    }
+
+    private var shortcutHintRow: some View {
+        HStack(spacing: 12) {
+            keycap(symbol: "globe", label: "fn")
+            Text("+").font(.system(size: 11, weight: .bold)).foregroundColor(.secondary)
+            keycap(symbol: "shift", label: "shift")
+            Text("Hold and say a sentence")
+                .font(.callout).foregroundColor(.secondary)
             Spacer()
         }
         .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.gray.opacity(0.15), lineWidth: 0.5)
-        )
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.gray.opacity(0.08)))
+    }
+
+    private var tryItOutputBox: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Your dictation").font(.caption).foregroundColor(.secondary)
+            ScrollView {
+                Text(capturedText.isEmpty
+                     ? "Hold Fn+Shift, say something — the result lands here."
+                     : capturedText)
+                    .font(.system(size: 14, design: capturedText.isEmpty ? .default : .monospaced))
+                    .foregroundColor(capturedText.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(minHeight: 90, maxHeight: 130)
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.textBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.gray.opacity(0.2), lineWidth: 0.5))
+        }
+    }
+
+    private func installInterceptHook() {
+        guard let pipeline = (NSApp.delegate as? AppDelegate)?.pipeline else { return }
+        pipeline.interceptOutput = { text in
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            capturedText = trimmed
+            withAnimation(.easeOut(duration: 0.2)) { confettiActive = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                withAnimation(.easeOut(duration: 0.5)) { confettiActive = false }
+            }
+        }
+    }
+
+    private func clearInterceptHook() {
+        (NSApp.delegate as? AppDelegate)?.pipeline?.interceptOutput = nil
     }
 
     private func keycap(symbol: String, label: String) -> some View {
@@ -622,14 +596,8 @@ struct OnboardingView: View {
         }
         .foregroundColor(.primary)
         .frame(width: 44, height: 36)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(NSColor.controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.gray.opacity(0.35), lineWidth: 0.5)
-        )
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.gray.opacity(0.35), lineWidth: 0.5))
         .shadow(color: Color.black.opacity(0.15), radius: 1, y: 1)
     }
 
@@ -637,8 +605,63 @@ struct OnboardingView: View {
 
     private func finish() {
         UserDefaults.standard.set(true, forKey: "sprich.hasCompletedOnboarding")
-        // AppDelegate listens for this to (re)start the hotkey manager with
-        // the freshly granted Accessibility permission and close the window.
+        clearInterceptHook()
         NotificationCenter.default.post(name: .sprichOnboardingComplete, object: nil)
+    }
+}
+
+// MARK: - Confetti
+
+/// Tiny self-contained particle confetti — Canvas + TimelineView, no
+/// third-party dependency. Fires for ~2.5s, ~50 particles.
+private struct ConfettiView: View {
+    private struct Particle: Identifiable {
+        let id = UUID()
+        let x0: CGFloat       // launch x as a fraction of width
+        let dx: CGFloat       // horizontal drift
+        let rotationSpeed: Double
+        let color: Color
+        let size: CGFloat
+        let delay: Double
+        let lifetime: Double
+    }
+
+    @State private var start: Date = .now
+    private let particles: [Particle] = (0..<55).map { _ in
+        Particle(
+            x0: CGFloat.random(in: 0.1...0.9),
+            dx: CGFloat.random(in: -0.25...0.25),
+            rotationSpeed: Double.random(in: 1.5...4.0),
+            color: [Color.pink, .orange, .yellow, .green, .blue, .purple].randomElement()!,
+            size: CGFloat.random(in: 5...10),
+            delay: Double.random(in: 0...0.4),
+            lifetime: Double.random(in: 1.6...2.2)
+        )
+    }
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            Canvas { ctx, size in
+                let now = timeline.date.timeIntervalSince(start)
+                for p in particles {
+                    let t = now - p.delay
+                    guard t > 0 else { continue }
+                    let progress = min(t / p.lifetime, 1.0)
+                    let x = p.x0 * size.width + p.dx * size.width * CGFloat(progress)
+                    // Easing: drop accelerates with gravity. progress^2 keeps the shape natural.
+                    let y = size.height * CGFloat(progress * progress)
+                    let rotation = Angle(degrees: p.rotationSpeed * t * 360)
+                    let rect = CGRect(x: x - p.size / 2, y: y - p.size / 2, width: p.size, height: p.size * 0.6)
+                    ctx.drawLayer { layer in
+                        layer.translateBy(x: rect.midX, y: rect.midY)
+                        layer.rotate(by: rotation)
+                        layer.translateBy(x: -rect.midX, y: -rect.midY)
+                        layer.opacity = max(0, 1 - progress)
+                        layer.fill(Path(rect), with: .color(p.color))
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
     }
 }

@@ -23,6 +23,27 @@ class PipelineCoordinator {
     /// that `startRecording` committed to.
     private var activeProvider: STTProviderType?
 
+    /// When set, transcription output is delivered to this closure
+    /// instead of pasted into the focused app via `TextInserter`. Used
+    /// by onboarding step 3 to surface the "Try it now" transcription
+    /// inside the onboarding window. Set on view-appear and cleared on
+    /// view-disappear.
+    ///
+    /// Errors and the auto-stop continuation hint are intentionally NOT
+    /// routed through the intercept — those are pipeline-internal
+    /// affordances meant for the real paste target.
+    var interceptOutput: ((String) -> Void)?
+
+    /// Single delivery point for transcription output. Honors
+    /// `interceptOutput` if set; otherwise pastes via `TextInserter`.
+    private func deliver(_ text: String) async {
+        if let intercept = interceptOutput {
+            intercept(text)
+            return
+        }
+        await TextInserter.insert(text)
+    }
+
     /// Decide which provider to use for a new dictation. Returns the
     /// user's configured choice unless:
     /// (a) that choice is a cloud provider, (b) there's no usable
@@ -228,7 +249,7 @@ class PipelineCoordinator {
             // keeps it readable without a huge visual thump.
             let capSeconds = appState.settings.maxRecordingDuration
             let continuation = "\n\n[Sprich: recording reached the \(capSeconds)-second limit — press the hotkey again to continue.]"
-            await TextInserter.insert(finalText + continuation)
+            await deliver(finalText + continuation)
         } catch {
             #if DEBUG
             print("[Sprich] ❌ Auto-stop pipeline error: \(error)")
@@ -437,8 +458,8 @@ class PipelineCoordinator {
                 #endif
             }
 
-            // 4. Paste
-            await TextInserter.insert(finalText)
+            // 4. Paste (or intercept, when onboarding's "Try it now" is active)
+            await deliver(finalText)
             let tEnd = CFAbsoluteTimeGetCurrent()
             #if DEBUG
             print("[Sprich] ✅ Total: \(Int((tEnd - pipelineStart) * 1000))ms")
