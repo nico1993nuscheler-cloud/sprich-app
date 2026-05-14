@@ -1,0 +1,45 @@
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#fafaf7;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="520" style="max-width:520px;background:#ffffff;border-radius:16px;padding:40px 36px;">
+        <tr>
+          <td>
+            <div style="display:inline-block;width:48px;height:48px;background:#1f5f4b;border-radius:12px;text-align:center;line-height:48px;color:#fafaf7;font-weight:700;font-size:24px;">S</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:28px;">
+            <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.018em;color:#0a0a0a;">Confirm your new email</h1>
+            <p style="margin:14px 0 0;font-size:15px;line-height:1.6;color:#5a5a5a;">
+              Click the button below to confirm the new email address on your Sprich account. This link is valid for one hour and works only once.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:28px;">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#1f5f4b;color:#fafaf7;padding:14px 28px;border-radius:9999px;text-decoration:none;font-size:15px;font-weight:600;letter-spacing:-0.005em;">Confirm new email</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:24px;">
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#8a8a8a;">
+              Button not working? Paste this link into your browser:<br>
+              <a href="{{ .ConfirmationURL }}" style="color:#1f5f4b;word-break:break-all;">{{ .ConfirmationURL }}</a>
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:32px;border-top:1px solid #ececec;">
+            <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#8a8a8a;">
+              You're receiving this because the email on your Sprich account is being changed from <strong>{{ .Email }}</strong> to <strong>{{ .NewEmail }}</strong>. If you didn't request this, contact <a href="mailto:support@sprichapp.com" style="color:#1f5f4b;">support@sprichapp.com</a> immediately.
+            </p>
+            <p style="margin:14px 0 0;font-size:12px;color:#8a8a8a;">
+              Sprich · Nico Nuscheler · Bad Wörishofen, Germany ·
+              <a href="mailto:support@sprichapp.com" style="color:#1f5f4b;">support@sprichapp.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
