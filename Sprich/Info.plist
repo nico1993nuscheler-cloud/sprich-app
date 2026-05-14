@@ -2,56 +2,45 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Sprich needs microphone access to record your voice for transcription. Audio is sent directly to your chosen provider and never saved to disk.</string>
-    <key>NSAccessibilityUsageDescription</key>
-    <string>Sprich needs Accessibility access to listen for your global shortcut (Fn+Shift / Fn+Control / Fn+Cmd) system-wide and to paste transcribed text into the focused app.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Sprich reads the active browser tab URL to detect whether you're in Gmail, Slack, Google Chat, or another chat/email surface so it can match the tone of its rewrite. Only the URL is read; nothing is sent to those apps.</string>
-    <key>CFBundleName</key>
-    <string>Sprich</string>
-    <key>CFBundleDisplayName</key>
-    <string>Sprich</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.niconuscheler.sprich</string>
-    <key>CFBundleVersion</key>
-    <string>2</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.1</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleExecutable</key>
-    <string>Sprich</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <!--
-        Explicit App Transport Security policy: no cleartext HTTP, no exceptions.
-        macOS 14+ blocks HTTP by default, but declaring it here makes the
-        guarantee auditable and prevents future regressions.
-    -->
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <false/>
-    </dict>
-    <!--
-        Custom URL scheme for the magic-link callback. Supabase redirects
-        the verified magic-link to `sprich://auth/callback#access_token=…`
-        and macOS routes the URL to Sprich via this registration. Handler
-        lives in AppDelegate.application(_:open:) → AuthService.handleDeepLink.
-    -->
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>com.niconuscheler.sprich.auth</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>sprich</string>
-            </array>
-        </dict>
-    </array>
+	<key>CFBundleDisplayName</key>
+	<string>Sprich</string>
+	<key>CFBundleExecutable</key>
+	<string>Sprich</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.niconuscheler.sprich</string>
+	<key>CFBundleName</key>
+	<string>Sprich</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.3</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.niconuscheler.sprich.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sprich</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>Sprich needs Accessibility access to listen for your global shortcut (Fn+Shift / Fn+Control / Fn+Cmd) system-wide and to paste transcribed text into the focused app.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+	</dict>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Sprich reads the active browser tab URL to detect whether you're in Gmail, Slack, Google Chat, or another chat/email surface so it can match the tone of its rewrite. Only the URL is read; nothing is sent to those apps.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Sprich needs microphone access to record your voice for transcription. Audio is sent directly to your chosen provider and never saved to disk.</string>
 </dict>
 </plist>
