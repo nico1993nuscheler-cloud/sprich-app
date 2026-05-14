@@ -37,7 +37,7 @@ final class TrialState: ObservableObject {
     var isEntitled: Bool {
         switch entitlement {
         case .licensed, .trialActive: return true
-        case .trialExpired, .signedOut: return false
+        case .trialExpired, .signedOut, .deviceBlocked: return false
         case .unknown:
             // Grace path: if we have a cached active trial and are
             // still inside the 24-h offline window, allow.
@@ -125,11 +125,14 @@ final class TrialState: ObservableObject {
                 return
             }
             if http.statusCode == 409 {
-                // Device already used by another account.
+                // Device already used by another account. This is a distinct
+                // failure mode from "trial expired" — surface it as such so
+                // the user sees "sign in with the original account" rather
+                // than a misleading "trial ended, buy now" prompt.
                 let body = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
                 self.lastError = (body["reason"] as? String)
-                    ?? "This device has already started a trial under another account."
-                self.entitlement = .trialExpired
+                    ?? "This device is already linked to another Sprich account."
+                self.entitlement = .deviceBlocked
                 return
             }
             guard (200..<300).contains(http.statusCode) else {
@@ -257,6 +260,11 @@ final class TrialState: ObservableObject {
             }
             return
         }
+        // Preserve a sticky .deviceBlocked across validate-trial responses
+        // that don't carry a trial/license payload — start-trial set this
+        // state for a reason and a no-data validate response shouldn't
+        // silently downgrade it to .unknown ("syncing…").
+        if entitlement == .deviceBlocked { return }
         entitlement = .unknown
     }
 
@@ -287,6 +295,11 @@ extension TrialState {
         case trialActive
         case trialExpired
         case licensed
+        /// `start-trial` returned 409 device_already_used. The user is
+        /// signed in but cannot record on this device under this account.
+        /// Resolution: sign in with the account that first claimed this
+        /// device, or contact support to release the fingerprint binding.
+        case deviceBlocked
     }
 
     struct TrialSnapshot: Codable, Equatable {
