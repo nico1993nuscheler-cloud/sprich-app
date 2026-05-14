@@ -341,17 +341,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        // Status header
-        let statusItem = NSMenuItem(title: "Sprich — Ready", action: nil, keyEquivalent: "")
-        statusItem.tag = 100
-        menu.addItem(statusItem)
+        // Status header (tag 100)
+        let header = NSMenuItem(title: "Sprich — Ready", action: nil, keyEquivalent: "")
+        header.tag = 100
+        menu.addItem(header)
         menu.addItem(NSMenuItem.separator())
 
-        // Account section — placed near the top for visibility. Title +
-        // styling are rebuilt live in `menuWillOpen` to reflect current
-        // sign-in state + trial countdown. When signed out, the row is
-        // styled bold with a sparkles icon to draw the user toward the
-        // sign-in flow.
+        // Account row (tag 300) + sign-out (tag 301). Title + styling are
+        // rebuilt live in `refreshDynamicMenuItems` to reflect auth +
+        // trial state across all 5 entitlement cases.
         let accountItem = NSMenuItem(
             title: "Sign in to start trial…",
             action: #selector(handleAccountClick),
@@ -372,34 +370,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Mode indicators
-        let literalItem = NSMenuItem(title: "Literal (Fn+Shift)", action: nil, keyEquivalent: "")
-        literalItem.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Literal mode")
-        menu.addItem(literalItem)
+        // Accessibility action row — only visible when AX is not granted.
+        // Click replays onboarding (card 2 walks the user through the
+        // System Settings grant flow). Tag 200 row + tag 201 separator
+        // are toggled together in `refreshDynamicMenuItems`.
+        let axItem = NSMenuItem(
+            title: "Finish setup — grant Accessibility",
+            action: #selector(replayOnboarding),
+            keyEquivalent: ""
+        )
+        axItem.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
+                               accessibilityDescription: "Accessibility permission required")
+        axItem.tag = 200
+        axItem.target = self
+        menu.addItem(axItem)
 
-        let formalItem = NSMenuItem(title: "Formal (Fn+Control)", action: nil, keyEquivalent: "")
-        formalItem.image = NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: "Formal mode")
-        menu.addItem(formalItem)
-
-        menu.addItem(NSMenuItem.separator())
+        let axSep = NSMenuItem.separator()
+        axSep.tag = 201
+        menu.addItem(axSep)
 
         // Language submenu — mirrors `AppLanguages.all` so the menubar
-        // surfaces every language the Settings picker does. Previous
-        // version hard-coded Auto / Deutsch / English and drifted out
-        // of sync when the 15-language dropdown shipped in 4e1dc68.
+        // surfaces every language the Settings picker does.
         let langItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
         let current = appState.settings.preferredLanguage
         for lang in AppLanguages.all {
-            let title = lang.displayName
             let item = NSMenuItem(
-                title: title,
+                title: lang.displayName,
                 action: #selector(setLanguageFromMenu(_:)),
                 keyEquivalent: ""
             )
             item.target = self
-            // Use `representedObject` to carry the ISO code (or nil for
-            // auto-detect) through AppKit's single-selector action API.
             item.representedObject = lang.code
             item.state = (lang.code == current) ? .on : .off
             langMenu.addItem(item)
@@ -409,59 +410,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Accessibility diagnostic — updated live on menu open via NSMenuDelegate
-        let axItem = NSMenuItem(
-            title: "Accessibility: …",
-            action: #selector(handleAccessibilityMenuClick),
-            keyEquivalent: ""
-        )
-        axItem.tag = 200
-        axItem.target = self
-        menu.addItem(axItem)
-
-        // Restart hotkey listener — useful after granting permission
-        let restartItem = NSMenuItem(
-            title: "Restart Hotkey Listener",
-            action: #selector(restartHotkeys),
-            keyEquivalent: ""
-        )
-        restartItem.target = self
-        menu.addItem(restartItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // How to use Sprich — shortcut cheat-sheet
+        // How to use Sprich — shortcut cheat-sheet (includes Literal /
+        // Formal mode reference, so those rows no longer live here).
         let helpItem = NSMenuItem(title: "How to use Sprich", action: #selector(openShortcutHelp), keyEquivalent: "")
         helpItem.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "How to use Sprich")
         helpItem.target = self
         menu.addItem(helpItem)
 
-        // Run onboarding again — useful for users who skipped it or
-        // missed a permission prompt, and for dev testing of the
-        // fresh-install flow without wiping UserDefaults.
-        let onboardItem = NSMenuItem(
-            title: "Run First-Time Setup…",
-            action: #selector(replayOnboarding),
-            keyEquivalent: ""
-        )
-        onboardItem.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Run first-time setup")
-        onboardItem.target = self
-        menu.addItem(onboardItem)
+        // Diagnostics submenu — recovery actions that are useful when
+        // something's off but shouldn't clutter the main menu.
+        let diagItem = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
+        diagItem.image = NSImage(systemSymbolName: "wrench.and.screwdriver", accessibilityDescription: "Diagnostics")
+        let diagMenu = NSMenu()
+
+        let restartItem = NSMenuItem(title: "Restart hotkey listener", action: #selector(restartHotkeys), keyEquivalent: "")
+        restartItem.target = self
+        diagMenu.addItem(restartItem)
+
+        let replayItem = NSMenuItem(title: "Replay onboarding…", action: #selector(replayOnboarding), keyEquivalent: "")
+        replayItem.target = self
+        diagMenu.addItem(replayItem)
+
+        let openAXItem = NSMenuItem(title: "Open Accessibility settings", action: #selector(openAXSettings), keyEquivalent: "")
+        openAXItem.target = self
+        diagMenu.addItem(openAXItem)
+
+        diagItem.submenu = diagMenu
+        menu.addItem(diagItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // Settings
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
-        // Quit
         let quitItem = NSMenuItem(title: "Quit Sprich", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         self.statusItem.menu = menu
         menu.delegate = self
+
+        // Live-refresh account row when auth or trial state flips —
+        // menuWillOpen alone would leave a stale row visible if the menu
+        // happens to be open during the transition. TrialState publishes
+        // `entitlement` so a Combine sink covers the trial-active /
+        // trial-expired / licensed transitions; the auth notification
+        // covers sign-in / sign-out.
+        NotificationCenter.default.addObserver(
+            forName: .sprichAuthStateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshDynamicMenuItems()
+        }
+        TrialState.shared.$entitlement
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshDynamicMenuItems()
+            }
+            .store(in: &appState.cancellables)
 
         // Also watch pipe-ready changes so the header flips from
         // "Loading Whisper…" → "Ready" the moment WhisperKit finishes
@@ -650,31 +658,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // MARK: - Accessibility diagnostic + restart
+    // MARK: - Accessibility recovery + diagnostics
 
-    @objc private func handleAccessibilityMenuClick() {
-        if Permissions.isAccessibilityGranted() {
-            // If it's granted but hotkeys aren't working, offer a restart.
-            restartHotkeys()
-        } else {
-            // Not granted — guide user to settings.
-            let alert = NSAlert()
-            alert.messageText = "Accessibility permission required"
-            alert.informativeText = """
-            Sprich needs Accessibility access to listen for your global shortcut.
-
-            Go to System Settings → Privacy & Security → Accessibility, enable Sprich, then click "Restart Hotkey Listener" from this menu.
-
-            If Sprich is already in the list but the toggle is on, remove it with the minus button and re-add it from /Applications. This is needed after app updates because macOS invalidates the grant when the code signature changes.
-            """
-            alert.addButton(withTitle: "Open Accessibility Settings")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .warning
-            NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn {
-                Permissions.openAccessibilitySettings()
-            }
-        }
+    @objc private func openAXSettings() {
+        Permissions.openAccessibilitySettings()
     }
 
     @objc private func restartHotkeys() {
@@ -706,80 +693,139 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - NSMenuDelegate — keep the accessibility item live
+// MARK: - NSMenuDelegate — keep dynamic rows live
 
 extension AppDelegate: NSMenuDelegate {
     nonisolated func menuWillOpen(_ menu: NSMenu) {
-        // Called just before the status menu appears. Refresh any items
-        // whose state depends on live app state: accessibility grant,
-        // and the Language submenu checkmarks.
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            self?.refreshDynamicMenuItems()
+        }
+    }
 
-            if let axItem = menu.item(withTag: 200) {
-                let granted = Permissions.isAccessibilityGranted()
-                axItem.title = granted
-                    ? "Accessibility: ✅ Granted"
-                    : "Accessibility: ❌ Not granted — click to fix"
-            }
+    /// Refresh menu rows whose state depends on live app state —
+    /// account row, AX recovery row visibility, and the Language
+    /// submenu checkmarks. Called both from `menuWillOpen` and from
+    /// `.sprichAuthStateChanged` / `TrialState.$entitlement` sinks so
+    /// the menu stays correct even when it's already open.
+    @MainActor
+    fileprivate func refreshDynamicMenuItems() {
+        guard let menu = statusItem?.menu else { return }
 
-            // Account / Sign-out labels reflect live auth + trial state.
-            // When signed-out, the row is styled bold + accent-colored
-            // with a sparkles icon so it stands out as the primary call
-            // to action in the menubar.
-            if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
-                let auth = AuthService.shared
-                let trial = TrialState.shared
-                if let email = auth.currentUserEmail, !email.isEmpty {
-                    let suffix: String
-                    switch trial.entitlement {
-                    case .licensed: suffix = "lifetime"
-                    case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
-                    case .trialExpired: suffix = "trial expired — buy"
-                    case .deviceBlocked: suffix = "device linked to another account"
-                    case .unknown: suffix = "trial · syncing…"
-                    case .signedOut: suffix = "—"
-                    }
-                    acct.attributedTitle = nil
-                    acct.title = "\(email)  ·  \(suffix)"
-                    acct.image = NSImage(systemSymbolName: "person.crop.circle.fill",
-                                         accessibilityDescription: "Account")
-                    signOut.isHidden = false
-                } else {
-                    let title = "Sign in to start your 7-day trial"
-                    let baseFont = NSFont.menuFont(ofSize: 0)
-                    let boldFont = NSFontManager.shared
-                        .convert(baseFont, toHaveTrait: .boldFontMask)
-                    let attr = NSMutableAttributedString(
-                        string: title,
-                        attributes: [
-                            .font: boldFont,
-                            .foregroundColor: NSColor.controlAccentColor,
-                        ]
-                    )
-                    acct.attributedTitle = attr
-                    acct.title = title
-                    acct.image = NSImage(systemSymbolName: "sparkles",
-                                         accessibilityDescription: "Sign in")?
-                        .withSymbolConfiguration(
-                            NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
-                        )
-                    signOut.isHidden = true
-                }
-            }
+        // Accessibility recovery row + its trailing separator are
+        // hidden entirely when AX is granted — the menu should only
+        // surface problems, not "everything's fine" status lines.
+        let axGranted = Permissions.isAccessibilityGranted()
+        if let axItem = menu.item(withTag: 200) {
+            axItem.isHidden = axGranted
+        }
+        if let axSep = menu.item(withTag: 201) {
+            axSep.isHidden = axGranted
+        }
 
-            // Sync Language submenu checkmarks to the current preference.
-            // Needed because the user can change language from anywhere —
-            // Settings picker, another menubar open — and we don't want
-            // stale ticks.
-            for item in menu.items {
-                guard let submenu = item.submenu else { continue }
-                let current = self.appState.settings.preferredLanguage
-                for langItem in submenu.items {
-                    let code = langItem.representedObject as? String
-                    langItem.state = (code == current) ? .on : .off
-                }
+        // Account row — drives one of 5 entitlement states.
+        if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
+            applyAccountRowState(account: acct, signOut: signOut)
+        }
+
+        // Language submenu checkmarks
+        let current = appState.settings.preferredLanguage
+        for item in menu.items {
+            guard let submenu = item.submenu else { continue }
+            for langItem in submenu.items {
+                guard langItem.action == #selector(setLanguageFromMenu(_:)) else { continue }
+                let code = langItem.representedObject as? String
+                langItem.state = (code == current) ? .on : .off
             }
+        }
+    }
+
+    @MainActor
+    private func applyAccountRowState(account: NSMenuItem, signOut: NSMenuItem) {
+        let auth = AuthService.shared
+        let trial = TrialState.shared
+        let email = (auth.currentUserEmail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let entitlement: TrialState.Entitlement = auth.isSignedIn ? trial.entitlement : .signedOut
+
+        switch entitlement {
+        case .signedOut:
+            let title = "Sign in to start your 7-day trial"
+            let baseFont = NSFont.menuFont(ofSize: 0)
+            let boldFont = NSFontManager.shared
+                .convert(baseFont, toHaveTrait: .boldFontMask)
+            account.attributedTitle = NSMutableAttributedString(
+                string: title,
+                attributes: [
+                    .font: boldFont,
+                    .foregroundColor: NSColor.controlAccentColor,
+                ]
+            )
+            account.title = title
+            account.image = NSImage(systemSymbolName: "sparkles",
+                                    accessibilityDescription: "Sign in")?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+                )
+            signOut.isHidden = true
+
+        case .unknown:
+            account.attributedTitle = nil
+            account.title = email.isEmpty
+                ? "Trial · syncing…"
+                : "\(email)  ·  trial · syncing…"
+            account.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath",
+                                    accessibilityDescription: "Trial syncing")
+            signOut.isHidden = email.isEmpty
+
+        case .trialActive:
+            account.attributedTitle = nil
+            let days = trial.daysRemaining
+            let dayLabel = days == 1 ? "1 day left" : "\(days) days left"
+            account.title = "\(email)  ·  trial · \(dayLabel)"
+            account.image = NSImage(systemSymbolName: "person.crop.circle.fill",
+                                    accessibilityDescription: "Account")
+            signOut.isHidden = false
+
+        case .trialExpired:
+            // Style the row to read like a CTA — bold accent — so it's
+            // visually distinct from the inert "Sign out" beneath it.
+            let title = "\(email)  ·  trial expired — buy"
+            let baseFont = NSFont.menuFont(ofSize: 0)
+            let boldFont = NSFontManager.shared
+                .convert(baseFont, toHaveTrait: .boldFontMask)
+            account.attributedTitle = NSMutableAttributedString(
+                string: title,
+                attributes: [
+                    .font: boldFont,
+                    .foregroundColor: NSColor.controlAccentColor,
+                ]
+            )
+            account.title = title
+            account.image = NSImage(systemSymbolName: "cart.fill",
+                                    accessibilityDescription: "Buy license")?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+                )
+            signOut.isHidden = false
+
+        case .licensed:
+            account.attributedTitle = nil
+            account.title = "\(email)  ·  Sprich Lifetime"
+            account.image = NSImage(systemSymbolName: "checkmark.seal.fill",
+                                    accessibilityDescription: "Licensed")
+            signOut.isHidden = false
+
+        case .deviceBlocked:
+            // This device's fingerprint is already attached to another
+            // account. Tell the user clearly so they sign out and switch
+            // to the right one — `handleAccountClick` routes this case
+            // to SignInView (default branch) which surfaces sign-out.
+            account.attributedTitle = nil
+            account.title = email.isEmpty
+                ? "Device linked to another account"
+                : "\(email)  ·  device linked to another account"
+            account.image = NSImage(systemSymbolName: "person.crop.circle.badge.exclamationmark",
+                                    accessibilityDescription: "Device blocked")
+            signOut.isHidden = false
         }
     }
 }
