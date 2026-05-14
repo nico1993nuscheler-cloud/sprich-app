@@ -305,6 +305,9 @@ final class AuthService: NSObject, ObservableObject {
         self.currentSession = session
         self.lastError = nil
 
+        #if DEBUG
+        print("[Sprich][Auth] completeSignIn: session set (user=\(userEmail.isEmpty ? "?" : userEmail)); posting .sprichAuthStateChanged")
+        #endif
         NotificationCenter.default.post(name: .sprichAuthStateChanged, object: nil)
 
         // Trial start happens server-side. Fire it now so the user lands
