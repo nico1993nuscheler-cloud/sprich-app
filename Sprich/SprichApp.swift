@@ -483,6 +483,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &appState.cancellables)
 
+        // Watch entitlement changes so the account row reflects new license
+        // / trial state live — important post-purchase. `LSUIElement = true`
+        // means clicking the menubar icon doesn't fire
+        // `didBecomeActiveNotification`, so the foreground-refresh path
+        // never triggers from menu interaction. Combined with the
+        // `menuWillOpen` validateNow() kick, this gives us:
+        //   1. menuWillOpen → fire validateNow async + render row from cache
+        //   2. validateNow completes → entitlement publishes new value
+        //   3. this sink fires → row re-rendered live (works even if the
+        //      user is still hovering the open menu).
+        TrialState.shared.$entitlement
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshMenuAccountRow()
+            }
+            .store(in: &appState.cancellables)
+
         // Observe status to update menu header
         appState.$status
             .receive(on: DispatchQueue.main)
@@ -722,7 +739,7 @@ extension AppDelegate: NSMenuDelegate {
     nonisolated func menuWillOpen(_ menu: NSMenu) {
         // Called just before the status menu appears. Refresh any items
         // whose state depends on live app state: accessibility grant,
-        // and the Language submenu checkmarks.
+        // account/trial row, and the Language submenu checkmarks.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
 
@@ -733,49 +750,19 @@ extension AppDelegate: NSMenuDelegate {
                     : "Accessibility: ❌ Not granted — click to fix"
             }
 
-            // Account / Sign-out labels reflect live auth + trial state.
-            // When signed-out, the row is styled bold + accent-colored
-            // with a sparkles icon so it stands out as the primary call
-            // to action in the menubar.
-            if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
-                let auth = AuthService.shared
-                let trial = TrialState.shared
-                if let email = auth.currentUserEmail, !email.isEmpty {
-                    let suffix: String
-                    switch trial.entitlement {
-                    case .licensed: suffix = "lifetime"
-                    case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
-                    case .trialExpired: suffix = "trial expired — buy"
-                    case .deviceBlocked: suffix = "device linked to another account"
-                    case .unknown: suffix = "trial · syncing…"
-                    case .signedOut: suffix = "—"
-                    }
-                    acct.attributedTitle = nil
-                    acct.title = "\(email)  ·  \(suffix)"
-                    acct.image = NSImage(systemSymbolName: "person.crop.circle.fill",
-                                         accessibilityDescription: "Account")
-                    signOut.isHidden = false
-                } else {
-                    let title = "Sign in to start your 7-day trial"
-                    let baseFont = NSFont.menuFont(ofSize: 0)
-                    let boldFont = NSFontManager.shared
-                        .convert(baseFont, toHaveTrait: .boldFontMask)
-                    let attr = NSMutableAttributedString(
-                        string: title,
-                        attributes: [
-                            .font: boldFont,
-                            .foregroundColor: NSColor.controlAccentColor,
-                        ]
-                    )
-                    acct.attributedTitle = attr
-                    acct.title = title
-                    acct.image = NSImage(systemSymbolName: "sparkles",
-                                         accessibilityDescription: "Sign in")?
-                        .withSymbolConfiguration(
-                            NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
-                        )
-                    signOut.isHidden = true
-                }
+            self.refreshMenuAccountRow()
+
+            // LSUIElement accessory app: clicking the menubar icon does NOT
+            // fire didBecomeActiveNotification, so the foreground-refresh
+            // observer never runs from a menu open. Kick validate-trial
+            // here so newly-inserted licenses surface within a second of
+            // the menu being opened. Combined with the
+            // TrialState.$entitlement sink wired in setupMenuBar(), the
+            // account row will update live if the menu is still open when
+            // the response arrives.
+            Task { @MainActor in
+                guard AuthService.shared.isSignedIn else { return }
+                await TrialState.shared.validateNow()
             }
 
             // Sync Language submenu checkmarks to the current preference.
@@ -790,6 +777,55 @@ extension AppDelegate: NSMenuDelegate {
                     langItem.state = (code == current) ? .on : .off
                 }
             }
+        }
+    }
+
+    /// Rebuild the account row (tag 300) + sign-out row (tag 301) from
+    /// current `AuthService` + `TrialState`. Called from `menuWillOpen`
+    /// and from the `TrialState.$entitlement` Combine sink — the latter
+    /// is what lets the menubar reflect post-purchase state without a
+    /// quit-relaunch.
+    fileprivate func refreshMenuAccountRow() {
+        guard let menu = statusItem?.menu,
+              let acct = menu.item(withTag: 300),
+              let signOut = menu.item(withTag: 301) else { return }
+        let auth = AuthService.shared
+        let trial = TrialState.shared
+        if let email = auth.currentUserEmail, !email.isEmpty {
+            let suffix: String
+            switch trial.entitlement {
+            case .licensed: suffix = "lifetime"
+            case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
+            case .trialExpired: suffix = "trial expired — buy"
+            case .deviceBlocked: suffix = "device linked to another account"
+            case .unknown: suffix = "trial · syncing…"
+            case .signedOut: suffix = "—"
+            }
+            acct.attributedTitle = nil
+            acct.title = "\(email)  ·  \(suffix)"
+            acct.image = NSImage(systemSymbolName: "person.crop.circle.fill",
+                                 accessibilityDescription: "Account")
+            signOut.isHidden = false
+        } else {
+            let title = "Sign in to start your 7-day trial"
+            let baseFont = NSFont.menuFont(ofSize: 0)
+            let boldFont = NSFontManager.shared
+                .convert(baseFont, toHaveTrait: .boldFontMask)
+            let attr = NSMutableAttributedString(
+                string: title,
+                attributes: [
+                    .font: boldFont,
+                    .foregroundColor: NSColor.controlAccentColor,
+                ]
+            )
+            acct.attributedTitle = attr
+            acct.title = title
+            acct.image = NSImage(systemSymbolName: "sparkles",
+                                 accessibilityDescription: "Sign in")?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+                )
+            signOut.isHidden = true
         }
     }
 }
