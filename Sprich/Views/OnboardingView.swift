@@ -202,6 +202,10 @@ struct OnboardingView: View {
             case .trialExpired, .signedOut:
                 Text("Reach out to support@sprichapp.com if you don't see a trial here — we'll sort it out.")
                     .font(.caption).foregroundColor(.secondary)
+            case .deviceBlocked:
+                Text(trial.lastError
+                     ?? "This Mac is already linked to another Sprich account. Sign in with that account, or email support@sprichapp.com to release the device.")
+                    .font(.caption).foregroundColor(.secondary)
             }
         }
         .padding(12)

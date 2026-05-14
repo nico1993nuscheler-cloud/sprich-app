@@ -130,6 +130,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
             if handled {
                 NSApp.activate(ignoringOtherApps: true)
+                // `NSApp.activate` brings the process forward but doesn't
+                // pick a specific window. After a magic-link round-trip
+                // the user expects to land back in whichever sign-in
+                // surface they came from. Raise the onboarding window
+                // first (it owns step 0 → 1 advance), falling back to
+                // the standalone sign-in window for repeat-sign-in flows.
+                if let win = onboardingWindow {
+                    win.makeKeyAndOrderFront(nil)
+                } else if let win = signInWindow {
+                    win.makeKeyAndOrderFront(nil)
+                }
             }
         }
     }
@@ -592,6 +603,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Already signed in — surface trial state. If expired, show
             // the buy modal; otherwise show the sign-in window so the
             // user can see the current account address (and sign out).
+            // .deviceBlocked routes through sign-in so the user can sign
+            // out and switch to the account that owns this device.
             switch TrialState.shared.entitlement {
             case .trialExpired:
                 showTrialLockWindow()
@@ -743,6 +756,7 @@ extension AppDelegate: NSMenuDelegate {
                     case .licensed: suffix = "lifetime"
                     case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
                     case .trialExpired: suffix = "trial expired — buy"
+                    case .deviceBlocked: suffix = "device linked to another account"
                     case .unknown: suffix = "trial · syncing…"
                     case .signedOut: suffix = "—"
                     }

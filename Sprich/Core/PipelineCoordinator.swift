@@ -519,6 +519,10 @@ class PipelineCoordinator {
         case .trialExpired:
             title = "Your 7-day Sprich trial has ended"
             body = "Buy a lifetime license at sprichapp.com/pricing to keep dictating. The buy window just opened."
+        case .deviceBlocked:
+            title = "This device is linked to another Sprich account"
+            body = TrialState.shared.lastError
+                ?? "Sign in with the account that first claimed this Mac, or email support@sprichapp.com to release the device."
         case .trialActive, .licensed:
             // Should not reach here; isEntitled returned false but the
             // enum says active — recompute by attempting validation
