@@ -2,7 +2,7 @@
 
 Canonical HTML for every transactional auth email Supabase sends on behalf of
 the Sprich project (`djiixtplbsutuiuxfhiy`). Files here are the source of
-truth — paste into the Supabase Dashboard whenever the live templates drift.
+truth; the live dashboard is mirrored from these via the Management API.
 
 ## Files
 
@@ -15,43 +15,55 @@ truth — paste into the Supabase Dashboard whenever the live templates drift.
 | `invite.html` | Invite user | You're invited to Sprich |
 | `reauthentication.html` | Reauthentication | Your Sprich verification code |
 
-`_base.html` is documentation only; do not paste.
+`_base.html` is documentation only.
 
-## Deploy
+## Files are HTML fragments
 
-1. Open https://supabase.com/dashboard/project/djiixtplbsutuiuxfhiy/auth/templates
-2. Pick a template tab on the left.
-3. Set **Subject heading** from the table above.
-4. Paste the matching file's entire contents into the **Message body** editor (Source view, not WYSIWYG).
-5. Save. Repeat for every template.
+Each file is a fragment (no `<!DOCTYPE>` / `<html>` / `<body>` wrapper).
+Supabase wraps them server-side. Inline styles only — Gmail / Outlook strip
+`<style>` blocks.
 
 ## Template variables
 
-Every template uses `{{ .ConfirmationURL }}` for the action link, except
-`reauthentication.html` which uses `{{ .Token }}` (a 6-digit OTP code).
-Supabase substitutes the correct verify type per template automatically — the
-HTML stays identical across types.
+- `{{ .ConfirmationURL }}` — the verify link (signup / magic / recovery / invite / email-change)
+- `{{ .Token }}` — 8-digit OTP code (reauthentication only; project has `mailer_otp_length=8`)
+- `{{ .Email }}` — current account email (used in footer / context lines)
+- `{{ .NewEmail }}` — new email (change-email template only)
 
-## Test
+## Deploy (push files → live dashboard)
 
-After saving each template, fire the corresponding flow against production:
+The repo has a script that PATCHes the Management API in one shot:
 
-- **Confirm signup** — sign up at https://sprichapp.com/signup with a **fresh** email never seen on the project. The email subject should be "Confirm your email — Sprich" and the body should render the branded card. Click the CTA → the link should land on `https://sprichapp.com/auth/callback#access_token=…` (verify the host is `sprichapp.com`, not `localhost`).
-- **Magic Link** — sign in with an **existing** email. Regression check that the magic-link template still renders.
-- **Reset / Change / Reauth** — low surface area; trigger from the dashboard's "Send test email" if available, or skip.
+```bash
+export SUPABASE_PAT='<personal access token from supabase.com/dashboard/account/tokens>'
+/tmp/sprich-patch-templates.sh
+```
 
-## Redirect-URL audit
+The script POSTs all 6 subjects + bodies, then GETs back and diffs each
+against the local file. Exits non-zero on any mismatch.
 
-If a verify link points at `localhost:3000` instead of `sprichapp.com`, the
-project's **Site URL** and **Redirect URLs** allow-list need updating:
+To pull live → file (e.g. if someone edited a template in the dashboard):
 
-https://supabase.com/dashboard/project/djiixtplbsutuiuxfhiy/auth/url-configuration
+```bash
+curl -sS "https://api.supabase.com/v1/projects/djiixtplbsutuiuxfhiy/config/auth" \
+  -H "Authorization: Bearer $SUPABASE_PAT" | jq -r '.mailer_templates_magic_link_content'
+```
 
-- **Site URL**: `https://sprichapp.com`
-- **Redirect URLs** must include: `https://sprichapp.com/auth/callback`, `https://sprichapp.com/auth/callback?**`, and `sprich://auth/callback`
+## Manual fallback (no PAT)
 
-The signup form at `app/signup/page.tsx` (landing repo) builds the redirect
-via `window.location.origin` + `/auth/callback`, so production signups always
-ask Supabase to redirect to `https://sprichapp.com/auth/callback`. Localhost
-artifacts in old test emails came from dev-mode signups against the same
-Supabase project.
+If you don't have a PAT handy, open
+https://supabase.com/dashboard/project/djiixtplbsutuiuxfhiy/auth/templates,
+pick a template tab, set the **Subject heading** from the table above, paste
+the matching file's contents into the **Message body** editor (Source view),
+save. Repeat per template.
+
+## Redirect-URL audit (already correct as of 2026-05-14)
+
+- **Site URL**: `https://sprichapp.com` ✓
+- **Redirect URLs** include: `https://sprichapp.com/auth/callback`, `https://sprichapp.com/auth/callback?next=/download`, `sprich://**` ✓
+
+If a verify link ever points at `localhost:3000`, the developer triggering
+the test signed up against the same Supabase project from a local dev
+server — that's a client-side `emailRedirectTo` artifact, not a Supabase
+config problem. Production signups (sprichapp.com) always pass the production
+callback.

@@ -1,43 +1,45 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light only">
-<meta name="supported-color-schemes" content="light">
-<title>Confirm your email</title>
-</head>
-<body style="margin:0;padding:0;background:#FAFAF7;-webkit-font-smoothing:antialiased;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Confirm your email to start your 7-day Sprich trial.</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAFAF7;padding:40px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#FFFFFF;border-radius:16px;border:1px solid #E8E5DE;">
-<tr><td style="padding:40px 40px 0 40px;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="56" height="56" align="center" valign="middle" style="width:56px;height:56px;background:#1F5F4B;border-radius:14px;color:#FAFAF7;font-size:30px;font-weight:800;line-height:56px;letter-spacing:-0.02em;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">S</td></tr></table>
-</td></tr>
-<tr><td style="padding:32px 40px 0 40px;">
-<h1 style="margin:0;font-size:28px;line-height:1.18;letter-spacing:-0.02em;color:#1A1F1B;font-weight:800;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Confirm your email</h1>
-<p style="margin:16px 0 0 0;font-size:16px;line-height:1.55;color:#4A524C;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Click the button below to confirm your email and start your 7-day Sprich trial. This link is valid for one hour and works only once.</p>
-</td></tr>
-<tr><td style="padding:28px 40px 0 40px;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-radius:9999px;background:#1F5F4B;box-shadow:0 2px 10px rgba(31,95,75,0.18);">
-<a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:16px 28px;color:#FAFAF7;text-decoration:none;font-size:15px;font-weight:600;letter-spacing:-0.005em;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Confirm and start my trial</a>
-</td></tr></table>
-</td></tr>
-<tr><td style="padding:28px 40px 0 40px;">
-<p style="margin:0;font-size:14px;line-height:1.55;color:#6E7570;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Button not working? Paste this link into your browser:</p>
-<p style="margin:8px 0 0 0;font-size:13px;line-height:1.5;color:#1F5F4B;word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;">{{ .ConfirmationURL }}</p>
-</td></tr>
-<tr><td style="padding:24px 40px 40px 40px;">
-<p style="margin:0;font-size:13px;line-height:1.55;color:#6E7570;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">If you didn't sign up for Sprich, you can safely ignore this email.</p>
-</td></tr>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#fafaf7;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="520" style="max-width:520px;background:#ffffff;border-radius:16px;padding:40px 36px;">
+        <tr>
+          <td>
+            <div style="display:inline-block;width:48px;height:48px;background:#1f5f4b;border-radius:12px;text-align:center;line-height:48px;color:#fafaf7;font-weight:700;font-size:24px;">S</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:28px;">
+            <h1 style="margin:0;font-size:24px;font-weight:700;letter-spacing:-0.018em;color:#0a0a0a;">Confirm your email</h1>
+            <p style="margin:14px 0 0;font-size:15px;line-height:1.6;color:#5a5a5a;">
+              Click the button below to confirm your email and start your 7-day Sprich trial. This link is valid for one hour and works only once.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:28px;">
+            <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#1f5f4b;color:#fafaf7;padding:14px 28px;border-radius:9999px;text-decoration:none;font-size:15px;font-weight:600;letter-spacing:-0.005em;">Confirm and start my trial</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:24px;">
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#8a8a8a;">
+              Button not working? Paste this link into your browser:<br>
+              <a href="{{ .ConfirmationURL }}" style="color:#1f5f4b;word-break:break-all;">{{ .ConfirmationURL }}</a>
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-top:32px;border-top:1px solid #ececec;">
+            <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#8a8a8a;">
+              You're receiving this because someone — hopefully you — entered <strong>{{ .Email }}</strong> on sprichapp.com to sign up for Sprich. If that wasn't you, ignore this email and nothing happens.
+            </p>
+            <p style="margin:14px 0 0;font-size:12px;color:#8a8a8a;">
+              Sprich · Nico Nuscheler · Bad Wörishofen, Germany ·
+              <a href="mailto:support@sprichapp.com" style="color:#1f5f4b;">support@sprichapp.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 </table>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;margin-top:24px;">
-<tr><td align="center" style="padding:0 8px;">
-<p style="margin:0;font-size:12px;line-height:1.6;color:#9099A0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">Sprich · Nico Nuscheler · Bad W&ouml;rishofen, Germany · <a href="mailto:support@sprichapp.com" style="color:#9099A0;text-decoration:underline;">support@sprichapp.com</a></p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>
