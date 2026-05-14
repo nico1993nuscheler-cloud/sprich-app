@@ -153,11 +153,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            // Close sign-in window on successful sign-in.
+            #if DEBUG
+            print("[Sprich][AppDelegate] .sprichAuthStateChanged → isSignedIn=\(AuthService.shared.isSignedIn) onboardingOpen=\(self.onboardingWindow != nil) signInOpen=\(self.signInWindow != nil)")
+            #endif
             if AuthService.shared.isSignedIn {
+                // Close any standalone sign-in window. The onboarding
+                // window's own observer handles the step 0 → 1 advance.
                 self.signInWindow?.close()
                 self.signInWindow = nil
             } else {
+                // Signed-out: re-prompt with the standalone sign-in
+                // window — but ONLY if the onboarding window isn't
+                // already covering that surface (its step 0 already
+                // shows SignInPanel). Otherwise we'd stack a second
+                // sign-in window on top of onboarding card 0.
+                guard self.onboardingWindow == nil else { return }
                 self.showSignInWindow()
             }
         }
