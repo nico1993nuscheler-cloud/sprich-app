@@ -65,6 +65,14 @@ struct OnboardingView: View {
             providerChoice = appState.settings.sttProvider
             cloudDisclosureExpanded = !providerChoice.isLocal
         }
+        .onDisappear {
+            // Catches the red-⊗ dismissal while on step 3 — neither the
+            // inner step's onDisappear nor the currentStep onChange fires
+            // in that path, leaving the intercept closure orphaned on the
+            // singleton PipelineCoordinator and swallowing all subsequent
+            // transcriptions.
+            clearInterceptHook()
+        }
         .onReceive(permissionTimer) { _ in
             accessibilityGranted = Permissions.isAccessibilityGranted()
             microphoneGranted = Permissions.isMicrophoneGranted()
