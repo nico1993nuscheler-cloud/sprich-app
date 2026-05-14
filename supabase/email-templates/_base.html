@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!--
+  Sprich branded email template — BASE reference.
+
+  This file is documentation only; do not paste it as a template.
+  Paste the type-specific files (confirm-signup.html, magic-link.html, etc.)
+  into the Supabase Dashboard at:
+    https://supabase.com/dashboard/project/djiixtplbsutuiuxfhiy/auth/templates
+
+  Each per-type file is self-contained and uses inline styles only — required
+  for email-client compatibility (Gmail / Outlook strip <style> blocks).
+
+  Brand tokens (kept hard-coded inline because email clients drop :root):
+    Forest   #1F5F4B   primary CTA + S-mark background
+    Cream    #FAFAF7   page bg + S-mark glyph color
+    Ink      #1A1F1B   headings
+    Ink-2    #4A524C   body copy
+    Ink-3    #6E7570   secondary copy + link fallback
+    Border   #E8E5DE   card hairline
+    Mute     #9099A0   footer text
+
+  Supabase template variables used:
+    {{ .ConfirmationURL }}  Verify URL with embedded token + redirect_to
+    (Other variables — .Email, .Token, .TokenHash, .SiteURL, .RedirectTo —
+    are not needed; we lean on .ConfirmationURL only so the template can be
+    reused unchanged across signup / magic-link / reset / change-email /
+    reauth flows. Supabase substitutes the correct verify type per template.)
+-->
