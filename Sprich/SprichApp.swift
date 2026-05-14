@@ -63,14 +63,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Set up global hotkeys
         setupHotkeys()
 
-        // First-launch onboarding: show before permission/settings prompts.
+        // First-launch onboarding. On repeat launches we deliberately do
+        // NOT auto-prompt for Accessibility or auto-open Settings — both
+        // are jarring on launch and the menubar status item ("Accessibility:
+        // ❌ Not granted — click to fix") already surfaces a revoked grant.
         let hasOnboarded = UserDefaults.standard.bool(forKey: "sprich.hasCompletedOnboarding")
         if !hasOnboarded {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.showOnboardingWindow()
             }
-        } else {
-            checkPermissions()
         }
 
         // After onboarding finishes, we need to (re)start hotkeys — at initial
@@ -199,8 +200,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
-        checkPermissions()
     }
 
     private func showOnboardingWindow() {
@@ -552,25 +551,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.appState.settings.customModeEnabled ?? false
         }
         hotkeyManager.start()
-    }
-
-    private func checkPermissions() {
-        // Check accessibility
-        if !Permissions.isAccessibilityGranted() {
-            // Show a brief notification — onboarding will guide them
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                Permissions.promptAccessibility()
-            }
-        }
-
-        // Microphone permission is requested when first recording starts
-
-        // Check if API keys are configured
-        if !appState.settings.hasRequiredAPIKeys {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                self?.openSettings()
-            }
-        }
     }
 
     @objc private func openSettings() {
