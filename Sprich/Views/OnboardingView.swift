@@ -70,15 +70,31 @@ struct OnboardingView: View {
             microphoneGranted = Permissions.isMicrophoneGranted()
         }
         .onChange(of: auth.isSignedIn) { signedIn in
-            // When the user clicks the magic-link / OAuth completes the
-            // round-trip, AuthService posts .sprichAuthStateChanged and
-            // bumps `currentSession`. Auto-advance from step 0 → 1 so
-            // the user lands in the permissions card immediately.
-            if signedIn && currentStep == 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    if currentStep == 0 { currentStep = 1 }
-                }
+            // SwiftUI .onChange of a computed property derived from a
+            // @Published is one signal — but in practice it has been
+            // observed to miss the transition (especially when the
+            // window isn't key during the OAuth/magic-link callback
+            // round-trip). The .onReceive below is the reliable path;
+            // this stays as a secondary trigger.
+            if signedIn {
+                #if DEBUG
+                print("[Sprich][Onboarding] .onChange(isSignedIn=true) — advancing from step \(currentStep)")
+                #endif
+                advanceFromWelcomeIfSignedIn()
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .sprichAuthStateChanged)) { _ in
+            // Primary auto-advance trigger. AuthService.completeSignIn
+            // posts this notification on @MainActor immediately after
+            // `currentSession` is set, for ALL three sign-in paths:
+            // magic-link deep-link, Apple OAuth (ASWebAuth callback),
+            // and Google OAuth (ASWebAuth callback). Observing the
+            // notification directly avoids any flakiness in SwiftUI's
+            // .onChange-of-computed-property observation.
+            #if DEBUG
+            print("[Sprich][Onboarding] .sprichAuthStateChanged received — isSignedIn=\(auth.isSignedIn) currentStep=\(currentStep)")
+            #endif
+            advanceFromWelcomeIfSignedIn()
         }
         .onChange(of: currentStep) { newStep in
             // Re-install the intercept hook every time the user actually
@@ -92,6 +108,23 @@ struct OnboardingView: View {
             } else {
                 clearInterceptHook()
             }
+        }
+    }
+
+    /// Auto-advance from the Welcome+Sign-in card to the Permissions card
+    /// once the user is signed in. Idempotent — safe to call from
+    /// multiple sources (notification + .onChange). The 0.6 s delay lets
+    /// the green "Signed in as …" summary flash briefly so the user
+    /// sees a confirmation beat before the card swaps.
+    private func advanceFromWelcomeIfSignedIn() {
+        guard AuthService.shared.isSignedIn else { return }
+        guard currentStep == 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard currentStep == 0 else { return }
+            #if DEBUG
+            print("[Sprich][Onboarding] advance: step 0 → 1")
+            #endif
+            currentStep = 1
         }
     }
 
