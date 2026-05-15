@@ -274,7 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let hosting = NSHostingController(rootView: TrialLockView())
         let window = NSWindow(contentViewController: hosting)
-        window.title = "Sprich — Trial expired"
+        window.title = "Trial expired"
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 460, height: 280))
         window.center()
