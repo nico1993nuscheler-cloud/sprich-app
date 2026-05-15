@@ -232,6 +232,7 @@ final class AuthService: NSObject, ObservableObject {
 
         Self.clearKeychain()
         self.currentSession = nil
+        self.lastError = nil
         TrialState.shared.handleSignOut()
         NotificationCenter.default.post(name: .sprichAuthStateChanged, object: nil)
     }
