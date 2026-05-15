@@ -153,11 +153,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            // Close sign-in window on successful sign-in.
+            #if DEBUG
+            print("[Sprich][AppDelegate] .sprichAuthStateChanged → isSignedIn=\(AuthService.shared.isSignedIn) onboardingOpen=\(self.onboardingWindow != nil) signInOpen=\(self.signInWindow != nil)")
+            #endif
             if AuthService.shared.isSignedIn {
+                // Close any standalone sign-in window. The onboarding
+                // window's own observer handles the step 0 → 1 advance.
                 self.signInWindow?.close()
                 self.signInWindow = nil
             } else {
+                // Signed-out: re-prompt with the standalone sign-in
+                // window — but ONLY if the onboarding window isn't
+                // already covering that surface (its step 0 already
+                // shows SignInPanel). Otherwise we'd stack a second
+                // sign-in window on top of onboarding card 0.
+                guard self.onboardingWindow == nil else { return }
                 self.showSignInWindow()
             }
         }
@@ -464,9 +474,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             self?.refreshDynamicMenuItems()
         }
+        // Combine `$entitlement` with `$trial` so daysRemaining flips
+        // (driven by the cached snapshot's expiresAt) also re-render
+        // the row, not just entitlement transitions. Per PR #20: this
+        // is what keeps the menu visibly flipping from "trial active"
+        // → "lifetime" mid-menu after a LemonSqueezy purchase.
         TrialState.shared.$entitlement
+            .combineLatest(TrialState.shared.$trial)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] _, _ in
                 self?.refreshDynamicMenuItems()
             }
             .store(in: &appState.cancellables)
@@ -506,6 +522,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &appState.cancellables)
+
+        // Re-render the account row whenever trial/license state changes.
+        // Without this, the row only refreshes on the *next* `menuWillOpen`,
+        // so a validate-trial response that arrives while the menu is
+        // already open wouldn't be visible until the user closes and
+        // re-opens it.
+        TrialState.shared.$entitlement
+            .combineLatest(TrialState.shared.$trial)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _ in
+                self?.refreshAccountMenuRow()
+            }
+            .store(in: &appState.cancellables)
+    }
+
+    /// Rebuilds the menubar account row (tag 300) + sign-out row (tag 301)
+    /// from the current `AuthService` + `TrialState` state. Called from
+    /// `menuWillOpen` and from the `TrialState.$entitlement` subscription
+    /// so the menu reflects live updates rather than waiting for the user
+    /// to re-open it.
+    fileprivate func refreshAccountMenuRow() {
+        guard let menu = statusItem?.menu,
+              let acct = menu.item(withTag: 300),
+              let signOut = menu.item(withTag: 301) else { return }
+
+        let auth = AuthService.shared
+        let trial = TrialState.shared
+        if let email = auth.currentUserEmail, !email.isEmpty {
+            let suffix: String
+            switch trial.entitlement {
+            case .licensed: suffix = "lifetime"
+            case .trialActive: suffix = "trial · \(trial.daysRemaining)d left"
+            case .trialExpired: suffix = "trial expired — buy"
+            case .deviceBlocked: suffix = "device linked to another account"
+            case .unknown: suffix = "trial · syncing…"
+            case .signedOut: suffix = "—"
+            }
+            acct.attributedTitle = nil
+            acct.title = "\(email)  ·  \(suffix)"
+            acct.image = NSImage(systemSymbolName: "person.crop.circle.fill",
+                                 accessibilityDescription: "Account")
+            signOut.isHidden = false
+        } else {
+            let title = "Sign in to start your 7-day trial"
+            let baseFont = NSFont.menuFont(ofSize: 0)
+            let boldFont = NSFontManager.shared
+                .convert(baseFont, toHaveTrait: .boldFontMask)
+            let attr = NSMutableAttributedString(
+                string: title,
+                attributes: [
+                    .font: boldFont,
+                    .foregroundColor: NSColor.controlAccentColor,
+                ]
+            )
+            acct.attributedTitle = attr
+            acct.title = title
+            acct.image = NSImage(systemSymbolName: "sparkles",
+                                 accessibilityDescription: "Sign in")?
+                .withSymbolConfiguration(
+                    NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+                )
+            signOut.isHidden = true
+        }
     }
 
     private func updateMenuBarIcon(button: NSStatusBarButton) {
@@ -699,6 +778,20 @@ extension AppDelegate: NSMenuDelegate {
     nonisolated func menuWillOpen(_ menu: NSMenu) {
         DispatchQueue.main.async { [weak self] in
             self?.refreshDynamicMenuItems()
+        }
+        // Kick off a fresh validate-trial. This is the primary
+        // "did the user just upgrade?" refresh path for menubar-only
+        // apps: `NSApplication.didBecomeActiveNotification` does NOT
+        // fire when a `.accessory` app's status item is clicked, so
+        // the foreground observer in `applicationDidFinishLaunching`
+        // can't catch this transition on its own. The `$entitlement`
+        // + `$trial` subscription in `setupMenuBar` re-renders the
+        // account row when the response lands, so the menu flips live
+        // if it's still open ~200–500 ms later, and is fresh next
+        // time either way.
+        Task { @MainActor in
+            guard AuthService.shared.isSignedIn else { return }
+            await TrialState.shared.validateNow()
         }
     }
 
