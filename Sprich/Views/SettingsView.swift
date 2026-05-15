@@ -22,6 +22,11 @@ struct SettingsView: View {
     @State private var showModelDownload = false
     @ObservedObject private var whisperManager = WhisperModelManager.shared
 
+    // Trial state drives the Upgrade button in the About card (L3.2).
+    // Live-refreshes the card so the button appears/disappears the moment
+    // entitlement flips (trial → expired, trial → licensed after purchase).
+    @StateObject private var trial = TrialState.shared
+
     var body: some View {
         TabView {
             apiKeysTab
@@ -810,15 +815,44 @@ struct SettingsView: View {
 
                 card {
                     sectionHeader("About")
+                    // Dynamic version from Info.plist (L3.1) — previously
+                    // hardcoded "v1.0.0" drifted from real releases. Tagline
+                    // also lost the "Open-source" claim that conflicts with
+                    // the commercial AppSumo positioning + BUSL relicensing.
+                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
                     HStack {
                         Image("SprichLogo")
                             .resizable()
                             .frame(width: 32, height: 32)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Sprich v1.0.0").font(.system(size: 13, weight: .semibold))
-                            Text("Open-source speech-to-text for macOS")
+                            Text("Sprich v\(appVersion)").font(.system(size: 13, weight: .semibold))
+                            Text("Speech-to-text for macOS")
                                 .font(.caption).foregroundColor(.secondary)
                         }
+                    }
+
+                    // Upgrade / license state (L3.2 — audit P0 #4 surface 4).
+                    // Trial-active: nudge to lifetime. Licensed: confirmation
+                    // badge. Other states: nothing (signed-out / unknown /
+                    // expired all have stronger surfaces elsewhere — the
+                    // menubar trial-expired row, the lock view, sign-in).
+                    switch trial.entitlement {
+                    case .trialActive:
+                        Button {
+                            if let url = URL(string: "https://sprichapp.com/pricing") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        } label: {
+                            Text("Upgrade to lifetime")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    case .licensed:
+                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundColor(.green)
+                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
+                        EmptyView()
                     }
                 }
 

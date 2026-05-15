@@ -64,6 +64,47 @@ final class TrialState: ObservableObject {
         static let hasLicense = "sprich.trial.hasLicense.v1"
     }
 
+    /// Defaults keys for the day-5/6 upgrade nag (L3.3). Separate enum so
+    /// the trial-cache keys above don't grow unbounded as we add UX state.
+    private enum NagDefaultsKey {
+        static let snoozedUntil = "sprich.trial.nagSnoozedUntil"
+        static let fireCount = "sprich.trial.nagFireCount"
+    }
+
+    /// True if the day-5/6 upgrade nag panel should appear right now.
+    ///
+    /// Triggered when entitlement is `.trialActive` and 2 or fewer days
+    /// remain. Hard cap: max 2 fires across the entire trial (prevents
+    /// nag-spiral on a user who keeps relaunching). Soft cap: 24-hour
+    /// snooze written by "Remind me later".
+    ///
+    /// Passive dismissal (auto-fade after 8 s without a click) does NOT
+    /// write a snooze — next launch may re-fire, intentionally. Click-
+    /// dismissal is the only signal of consent.
+    var shouldShowUpgradeNag: Bool {
+        guard entitlement == .trialActive, daysRemaining <= 2 else { return false }
+        let fireCount = UserDefaults.standard.integer(forKey: NagDefaultsKey.fireCount)
+        guard fireCount < 2 else { return false }
+        let snoozed = UserDefaults.standard.double(forKey: NagDefaultsKey.snoozedUntil)
+        return Date().timeIntervalSince1970 > snoozed
+    }
+
+    /// Called by `UpgradeNagController.show(...)` after the panel renders.
+    /// Increments the lifetime-of-trial fire counter (hard cap is 2).
+    func recordNagFired() {
+        let n = UserDefaults.standard.integer(forKey: NagDefaultsKey.fireCount)
+        UserDefaults.standard.set(n + 1, forKey: NagDefaultsKey.fireCount)
+    }
+
+    /// Called by "Remind me later" (24 h) and "Upgrade" (effectively
+    /// distantFuture — once they're converting, stop nagging).
+    func snoozeNag(by seconds: TimeInterval) {
+        UserDefaults.standard.set(
+            Date().addingTimeInterval(seconds).timeIntervalSince1970,
+            forKey: NagDefaultsKey.snoozedUntil
+        )
+    }
+
     private var refreshTimer: Timer?
 
     // MARK: - Init
@@ -90,6 +131,10 @@ final class TrialState: ObservableObject {
         UserDefaults.standard.removeObject(forKey: DefaultsKey.trialSnapshot)
         UserDefaults.standard.removeObject(forKey: DefaultsKey.lastServerSync)
         UserDefaults.standard.removeObject(forKey: DefaultsKey.hasLicense)
+        // Reset upgrade-nag bookkeeping too — a fresh account on the same
+        // machine should get a fresh nag budget.
+        UserDefaults.standard.removeObject(forKey: NagDefaultsKey.snoozedUntil)
+        UserDefaults.standard.removeObject(forKey: NagDefaultsKey.fireCount)
         trial = nil
         hasLicense = false
         lastServerSync = nil
