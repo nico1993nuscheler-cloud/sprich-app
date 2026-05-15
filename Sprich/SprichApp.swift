@@ -181,6 +181,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             #if DEBUG
             print("[Sprich][AppDelegate] .sprichAuthStateChanged → isSignedIn=\(AuthService.shared.isSignedIn) onboardingOpen=\(self.onboardingWindow != nil) signInOpen=\(self.signInWindow != nil)")
             #endif
+
+            // Live-refresh the menubar account row first. menuWillOpen
+            // alone would leave a stale row visible if the menu happens
+            // to be open during the transition. `TrialState.$entitlement`
+            // covers trial-active / trial-expired / licensed transitions
+            // via the Combine sink in `setupMenuBar`; this branch covers
+            // sign-in / sign-out.
+            self.refreshDynamicMenuItems()
+
             if AuthService.shared.isSignedIn {
                 // Close any standalone sign-in window. The onboarding
                 // window's own observer handles the step 0 → 1 advance.
@@ -580,19 +589,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem.menu = menu
         menu.delegate = self
 
-        // Live-refresh account row when auth or trial state flips —
-        // menuWillOpen alone would leave a stale row visible if the menu
-        // happens to be open during the transition. TrialState publishes
-        // `entitlement` so a Combine sink covers the trial-active /
-        // trial-expired / licensed transitions; the auth notification
-        // covers sign-in / sign-out.
-        NotificationCenter.default.addObserver(
-            forName: .sprichAuthStateChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.refreshDynamicMenuItems()
-        }
+        // Auth-flip refresh of the account row is handled by the single
+        // consolidated `.sprichAuthStateChanged` observer in
+        // `observeAuthState()` — it calls `refreshDynamicMenuItems()`
+        // alongside the window-routing logic so both responsibilities
+        // stay in one place.
+        //
         // Combine `$entitlement` with `$trial` so daysRemaining flips
         // (driven by the cached snapshot's expiresAt) also re-render
         // the row, not just entitlement transitions. Per PR #20: this
