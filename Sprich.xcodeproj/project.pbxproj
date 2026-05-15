@@ -44,7 +44,8 @@
 		A10000035 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000037 /* SignInView.swift */; };
 		A10000036 /* TrialLockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000038 /* TrialLockView.swift */; };
 		A10000037 /* SignInPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000039 /* SignInPanel.swift */; };
-		A10000040 /* UpgradeNagPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000040 /* UpgradeNagPanel.swift */; };
+		A10000040 /* UpgradeNagPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000041 /* UpgradeNagPanel.swift */; };
+		A10000038 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000040 /* AccountView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -87,7 +88,8 @@
 		B10000037 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		B10000038 /* TrialLockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrialLockView.swift; sourceTree = "<group>"; };
 		B10000039 /* SignInPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPanel.swift; sourceTree = "<group>"; };
-		B10000040 /* UpgradeNagPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpgradeNagPanel.swift; sourceTree = "<group>"; };
+		B10000041 /* UpgradeNagPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpgradeNagPanel.swift; sourceTree = "<group>"; };
+		B10000040 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -196,7 +198,8 @@
 				B10000037 /* SignInView.swift */,
 				B10000039 /* SignInPanel.swift */,
 				B10000038 /* TrialLockView.swift */,
-				B10000040 /* UpgradeNagPanel.swift */,
+				B10000041 /* UpgradeNagPanel.swift */,
+				B10000040 /* AccountView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -331,6 +334,7 @@
 				A10000037 /* SignInPanel.swift in Sources */,
 				A10000036 /* TrialLockView.swift in Sources */,
 				A10000040 /* UpgradeNagPanel.swift in Sources */,
+				A10000038 /* AccountView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
