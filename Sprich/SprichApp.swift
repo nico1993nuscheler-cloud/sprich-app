@@ -108,12 +108,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             Task { @MainActor in
                 guard AuthService.shared.isSignedIn else { return }
                 await TrialState.shared.validateNow()
+                // After validate refreshes daysRemaining + entitlement,
+                // re-check whether the day-5/6 upgrade nag should fire
+                // (L3.3). Foreground is a natural trigger point — the
+                // user just came back to the app and the trial state is
+                // now authoritative.
+                self?.maybeShowUpgradeNag()
             }
         }
+
+        // Initial nag check after launch. Delayed so `bootstrapAfterLaunch`
+        // → `validateNow` has had a chance to populate `daysRemaining` from
+        // the server; otherwise we'd be reading the cached snapshot only,
+        // which is fine but the foreground hook is a more reliable trigger.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.maybeShowUpgradeNag()
+        }
+    }
+
+    /// Shows the day-5/6 upgrade nag panel if `TrialState` says we should.
+    /// Idempotent — `shouldShowUpgradeNag` enforces the snooze + hard cap.
+    /// Anchors under the menubar icon via the `statusItem`.
+    private func maybeShowUpgradeNag() {
+        guard TrialState.shared.shouldShowUpgradeNag else { return }
+        guard let statusItem = self.statusItem else { return }
+        let days = TrialState.shared.daysRemaining
+        UpgradeNagController.shared.show(daysRemaining: days, anchorTo: statusItem)
+        TrialState.shared.recordNagFired()
     }
 
     /// Apple Events / kAEGetURL → custom URL scheme route.
