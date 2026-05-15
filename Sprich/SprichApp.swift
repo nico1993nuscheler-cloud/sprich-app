@@ -186,6 +186,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 // window's own observer handles the step 0 → 1 advance.
                 self.signInWindow?.close()
                 self.signInWindow = nil
+
+                // Post-sign-in landing: if this is a standalone
+                // re-sign-in (no onboarding flow in progress), open
+                // AccountView so the user lands on a meaningful surface
+                // showing their fresh trial / license / device-blocked
+                // state — rather than the menubar-only vacuum Nico hit
+                // during real v1.0.4 testing on 2026-05-15.
+                //
+                // Onboarding has its own `.onChange(of: auth.isSignedIn)`
+                // step advance (PR #22), so we skip the AccountView
+                // open when onboardingWindow is non-nil — otherwise we'd
+                // stack a second window on top of card 1+.
+                //
+                // 600 ms matches the onboarding auto-advance delay and
+                // gives `TrialState.bootstrapAfterLaunch` /
+                // `validateNow` a window to populate entitlement from
+                // the server before AccountView reads it.
+                if self.onboardingWindow == nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                        guard let self else { return }
+                        guard AuthService.shared.isSignedIn else { return }
+                        guard self.onboardingWindow == nil else { return }
+                        self.showAccountWindow()
+                    }
+                }
             } else {
                 // Signed-out: re-prompt with the standalone sign-in
                 // window — but ONLY if the onboarding window isn't
@@ -330,7 +355,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "Sprich account"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 420, height: 360))
+        // `.deviceBlocked` body is taller (two recovery cards + support
+        // footnote) so we size the window to its content; the standard
+        // body uses its own `.frame(420×360)` inside the view and is
+        // centered within the larger window when shown there.
+        let isDeviceBlocked = TrialState.shared.entitlement == .deviceBlocked
+        let size = isDeviceBlocked
+            ? NSSize(width: 460, height: 460)
+            : NSSize(width: 420, height: 360)
+        window.setContentSize(size)
         window.center()
         window.isReleasedWhenClosed = false
         NSApp.activate(ignoringOtherApps: true)
@@ -864,16 +897,25 @@ extension AppDelegate: NSMenuDelegate {
             applyAccountRowState(account: acct, signOut: signOut)
         }
 
-        // Sprint 2E L1.3 — Upgrade row visible only during active trial.
-        // PR #17 already styles the account row itself as a CTA when
-        // `.trialExpired`; this row covers the still-active 7-day window
-        // where the audit found no buy nudge.
+        // Sprint 2E L1.3 — Upgrade row visibility.
+        // Visible whenever the user has an in-app path to buy that the
+        // server will honor: active trial, expired trial, and the
+        // device-fingerprint anti-abuse block (`.deviceBlocked`) — in
+        // all three cases `redeem-license` attaches by email and frees
+        // the user up. Hidden for `.licensed` (already owns it),
+        // `.signedOut` (sign in first), and `.unknown` (let validateNow
+        // settle before nudging — avoids a flashy CTA flicker on launch).
         if let upgrade = menu.item(withTag: 302) {
             let entitlement: TrialState.Entitlement =
                 AuthService.shared.isSignedIn
                     ? TrialState.shared.entitlement
                     : .signedOut
-            upgrade.isHidden = (entitlement != .trialActive)
+            switch entitlement {
+            case .trialActive, .trialExpired, .deviceBlocked:
+                upgrade.isHidden = false
+            case .licensed, .signedOut, .unknown:
+                upgrade.isHidden = true
+            }
         }
 
         // Language submenu checkmarks

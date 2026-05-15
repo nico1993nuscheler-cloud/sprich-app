@@ -10,6 +10,15 @@ import AppKit
 /// SprichMark + email + one-line trial state + Upgrade button (active
 /// trial only) + Sign out. The richer panel (receipts, devices, support
 /// links) waits for Sprint 3.
+///
+/// 2026-05-15 follow-up (post-v1.0.4 testing audit): added a
+/// `.deviceBlocked` branch — the device-fingerprint anti-trial-abuse
+/// gate (HTTP 409 from `start-trial`) was a dead-end surface. Now we
+/// acknowledge the state and offer two recovery paths (sign back into
+/// the original account, or buy a license — which `redeem-license`
+/// attaches by email, freeing the user up). Mirrors TrialLockView's
+/// visual language since both are "we acknowledge your bad state +
+/// here's a way out" surfaces.
 struct AccountView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var trial = TrialState.shared
@@ -20,6 +29,19 @@ struct AccountView: View {
     let onSignOut: () -> Void
 
     var body: some View {
+        Group {
+            if trial.entitlement == .deviceBlocked {
+                deviceBlockedBody
+            } else {
+                standardBody
+            }
+        }
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    // MARK: - Standard signed-in body (trialActive / licensed / unknown)
+
+    private var standardBody: some View {
         VStack(spacing: 22) {
             SprichMark()
                 .frame(width: 52, height: 52)
@@ -58,7 +80,106 @@ struct AccountView: View {
         }
         .padding(28)
         .frame(width: 420, height: 360)
-        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    // MARK: - Device-blocked body
+
+    /// Shown when the server's anti-trial-abuse fingerprint check has
+    /// already attached this Mac to another account. Two recovery
+    /// affordances + a support-mailto footnote so a legitimate buyer
+    /// is never stuck.
+    private var deviceBlockedBody: some View {
+        let currentEmail = auth.currentUserEmail ?? ""
+        return VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("This Mac is linked to another Sprich account")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(
+                    "We bind the 7-day trial to your device to prevent abuse. "
+                    + "To use Sprich on this Mac with **\(currentEmail)**, you have two options:"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 12) {
+                recoveryCard(
+                    title: "Sign in to the original account",
+                    body: "If you have access to the email this Mac was originally registered under, sign back in with that account. Your trial / license state will be restored immediately.",
+                    button: AnyView(
+                        Button("Sign out and try another email") {
+                            onSignOut()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    )
+                )
+
+                recoveryCard(
+                    title: "Buy a license for this account",
+                    body: "Lifetime licenses follow your Sprich account, not your device — buy now and you can use this account on any Mac (after the device is freed).",
+                    button: AnyView(
+                        Button {
+                            NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                        } label: {
+                            Text("Buy lifetime license →")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .keyboardShortcut(.defaultAction)
+                    )
+                )
+            }
+
+            supportFootnote(currentEmail: currentEmail)
+
+            Spacer(minLength: 0)
+        }
+        .padding(28)
+        .frame(width: 460, height: 460)
+    }
+
+    private func recoveryCard(title: String, body: String, button: AnyView) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.primary)
+            Text(body)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            button
+                .padding(.top, 2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func supportFootnote(currentEmail: String) -> some View {
+        // mailto with pre-filled subject so Nico's eventual triage is
+        // cleaner. URL-encode the subject so addresses with `+` or
+        // spaces don't break the link.
+        let subject = "Move device — \(currentEmail)"
+        let encoded = subject.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed
+        ) ?? subject
+        let mailto = URL(string: "mailto:support@sprichapp.com?subject=\(encoded)")
+            ?? URL(string: "mailto:support@sprichapp.com")!
+
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("Lost access to the original account? Email")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Link("support@sprichapp.com", destination: mailto)
+                .font(.caption)
+            Text("with this device's email and we'll move it manually.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Email row
