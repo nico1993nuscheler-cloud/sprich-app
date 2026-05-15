@@ -202,20 +202,27 @@ struct OnboardingView: View {
                 signedInSummary
             } else {
                 SignInPanel(showsHeader: false)
+                // Sprint 2E L2.1 — sign-in is mandatory to advance past
+                // welcome. Without it the user has no trial → "Try it
+                // now" silently fails (audit P0 #1). Reassurance caption
+                // explains why we ask and what we won't do.
+                Text("Sign in is required for your 7-day free trial. We use Supabase EU for auth — no marketing emails.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
 
-            HStack {
-                Spacer()
-                if auth.isSignedIn {
+            // Only render a nav row when signed in. The signed-out path
+            // intentionally has no Continue / Skip — the SignInPanel is
+            // the only way forward, and `.onChange(of: auth.isSignedIn)`
+            // auto-advances to step 1 once sign-in lands.
+            if auth.isSignedIn {
+                HStack {
+                    Spacer()
                     Button("Continue") { currentStep = 1 }
                         .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                } else {
-                    Button("Skip — sign in later") { currentStep = 1 }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
                         .keyboardShortcut(.defaultAction)
                 }
             }
@@ -428,7 +435,24 @@ struct OnboardingView: View {
     private var providerPrimaryLabel: String {
         switch providerChoice {
         case .local:
-            return whisperManager.isPipeReady ? "Continue — Sprich is ready" : "Continue — finish in the background"
+            // Sprint 2E L2.2 — Continue is disabled until the pipe is
+            // ready, so the disabled label needs to communicate "we're
+            // working on it" rather than the old "finish in the
+            // background" (which let the user advance into a state
+            // where Try-it-now silently couldn't transcribe).
+            if whisperManager.isPipeReady {
+                return "Continue — Sprich is ready"
+            }
+            switch whisperManager.state {
+            case .downloading(let p):
+                return "Whisper is finishing setup… \(Int(p * 100))%"
+            case .preparing:
+                return "Whisper is finishing setup…"
+            case .failed:
+                return "Whisper setup failed — see below"
+            default:
+                return "Whisper is finishing setup…"
+            }
         case .groq:
             return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
                 ? "Continue"
@@ -441,6 +465,13 @@ struct OnboardingView: View {
     private var providerPrimaryDisabled: Bool {
         if providerChoice == .groq {
             return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if providerChoice == .local {
+            // Sprint 2E L2.2 — Block advancing past step 2 until the
+            // local Whisper pipe is fully ready. Without this gate the
+            // user lands on step 3 (Try it now), holds the hotkey, and
+            // gets nothing because WhisperKit is still warming. Audit P0 #6.
+            return !whisperManager.isPipeReady
         }
         return false
     }

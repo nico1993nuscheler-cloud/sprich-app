@@ -246,6 +246,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var helpWindow: NSWindow?
     private var signInWindow: NSWindow?
     private var trialLockWindow: NSWindow?
+    private var accountWindow: NSWindow?
 
     private func showSignInWindow() {
         if let win = signInWindow {
@@ -282,6 +283,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         self.trialLockWindow = window
+    }
+
+    /// Sprint 2E L1.4 — minimal AccountView for signed-in users.
+    /// Routed to from `handleAccountClick` for `.trialActive` / `.licensed`
+    /// / `.unknown` / `.deviceBlocked`. `.trialExpired` continues to land
+    /// on `TrialLockView` (PR #17 wiring). `.signedOut` lands on
+    /// `SignInView` (unchanged).
+    @MainActor
+    func showAccountWindow() {
+        if let win = accountWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            win.makeKeyAndOrderFront(nil)
+            return
+        }
+        let hosting = NSHostingController(
+            rootView: AccountView(onSignOut: { [weak self] in
+                self?.confirmAndSignOut()
+            })
+        )
+        let window = NSWindow(contentViewController: hosting)
+        window.title = "Sprich account"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 420, height: 360))
+        window.center()
+        window.isReleasedWhenClosed = false
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        self.accountWindow = window
     }
 
     private func showShortcutHelpWindow() {
@@ -351,8 +380,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        // Status header (tag 100)
-        let header = NSMenuItem(title: "Sprich — Ready", action: nil, keyEquivalent: "")
+        // Status header (tag 100). Sprint 2E L1.5 — drop the "Sprich — "
+        // prefix; the menubar context already identifies the app.
+        let header = NSMenuItem(title: "Ready", action: nil, keyEquivalent: "")
         header.tag = 100
         menu.addItem(header)
         menu.addItem(NSMenuItem.separator())
@@ -377,6 +407,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         signOutItem.tag = 301
         signOutItem.target = self
         menu.addItem(signOutItem)
+
+        // Sprint 2E L1.3 — active-trial Upgrade row. Hidden in every
+        // entitlement state except `.trialActive`. Visibility is
+        // refreshed live by `refreshDynamicMenuItems` via the
+        // `$entitlement`/`$trial` Combine sink set up below, so this
+        // row appears/disappears without waiting for the next
+        // `menuWillOpen`.
+        let upgradeItem = NSMenuItem(
+            title: "Upgrade to lifetime",
+            action: #selector(handleUpgradeClick),
+            keyEquivalent: ""
+        )
+        upgradeItem.tag = 302
+        upgradeItem.target = self
+        upgradeItem.image = NSImage(systemSymbolName: "cart.fill",
+                                    accessibilityDescription: "Upgrade to lifetime")?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(paletteColors: [.controlAccentColor])
+            )
+        let upgradeBaseFont = NSFont.menuFont(ofSize: 0)
+        let upgradeBoldFont = NSFontManager.shared
+            .convert(upgradeBaseFont, toHaveTrait: .boldFontMask)
+        upgradeItem.attributedTitle = NSAttributedString(
+            string: "Upgrade to lifetime →",
+            attributes: [
+                .font: upgradeBoldFont,
+                .foregroundColor: NSColor.controlAccentColor,
+            ]
+        )
+        upgradeItem.isHidden = true
+        menu.addItem(upgradeItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -509,16 +570,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // WhisperModelManager.isPipeReady for the gap.
                     let provider = self?.appState.settings.sttProvider ?? .groq
                     if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
-                        menuItem.title = "Sprich — Loading Whisper…"
+                        menuItem.title = "Finishing setup…"
                     } else {
-                        menuItem.title = "Sprich — Ready"
+                        menuItem.title = "Ready"
                     }
                 case .recording(let mode):
-                    menuItem.title = "Sprich — Recording (\(mode.displayName))..."
+                    menuItem.title = "Recording — \(mode.displayName) mode"
                 case .processing:
-                    menuItem.title = "Sprich — Processing..."
+                    menuItem.title = "Cleaning up your text…"
                 case .error(let msg):
-                    menuItem.title = "Sprich — Error: \(msg)"
+                    menuItem.title = "Error — \(msg)"
                 }
             }
             .store(in: &appState.cancellables)
@@ -603,17 +664,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleAccountClick() {
+        // Sprint 2E L1.4 — route signed-in users to the new minimal
+        // AccountView instead of the old SignInView fallthrough that
+        // confusingly read "Sign in to start your 7-day trial" for users
+        // who were already signed in.
         if AuthService.shared.isSignedIn {
-            // Already signed in — surface trial state. If expired, show
-            // the buy modal; otherwise show the sign-in window so the
-            // user can see the current account address (and sign out).
-            // .deviceBlocked routes through sign-in so the user can sign
-            // out and switch to the account that owns this device.
             switch TrialState.shared.entitlement {
             case .trialExpired:
                 showTrialLockWindow()
-            default:
+            case .signedOut:
+                // Defensive: AuthService says signed in but TrialState
+                // hasn't caught up. Surface the sign-in window so the
+                // user can recover from a bad-state local cache.
                 showSignInWindow()
+            case .trialActive, .licensed, .unknown, .deviceBlocked:
+                showAccountWindow()
             }
         } else {
             showSignInWindow()
@@ -621,6 +686,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleSignOutClick() {
+        confirmAndSignOut()
+    }
+
+    /// Shared sign-out confirmation alert. Used by the menubar `Sign out`
+    /// row and by `AccountView`'s sign-out button.
+    @MainActor
+    fileprivate func confirmAndSignOut() {
         guard AuthService.shared.isSignedIn else { return }
         let alert = NSAlert()
         alert.messageText = "Sign out of Sprich?"
@@ -631,7 +703,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             AuthService.shared.signOut()
+            accountWindow?.close()
+            accountWindow = nil
         }
+    }
+
+    /// Sprint 2E L1.3 — opens the pricing page from the active-trial
+    /// Upgrade menu row. Hidden in every other entitlement state.
+    @objc private func handleUpgradeClick() {
+        NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
     }
 
     /// Unified language-switch handler for the menubar submenu.
@@ -645,22 +725,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Re-derive the menubar header title from the current app+pipe
     /// state. Called when pipe-ready flips without a status change.
+    /// Sprint 2E L1.5 — copy normalized (no "Sprich — " prefix; proper
+    /// ellipsis; em-dash separator).
     private func refreshMenuHeaderForCurrentStatus() {
         guard let menuItem = statusItem?.menu?.item(withTag: 100) else { return }
         switch appState.status {
         case .ready:
             let provider = appState.settings.sttProvider
             if provider.isLocal && !WhisperModelManager.shared.isPipeReady {
-                menuItem.title = "Sprich — Loading Whisper…"
+                menuItem.title = "Finishing setup…"
             } else {
-                menuItem.title = "Sprich — Ready"
+                menuItem.title = "Ready"
             }
         case .recording(let mode):
-            menuItem.title = "Sprich — Recording (\(mode.displayName))..."
+            menuItem.title = "Recording — \(mode.displayName) mode"
         case .processing:
-            menuItem.title = "Sprich — Processing..."
+            menuItem.title = "Cleaning up your text…"
         case .error(let msg):
-            menuItem.title = "Sprich — Error: \(msg)"
+            menuItem.title = "Error — \(msg)"
         }
     }
 
@@ -755,6 +837,18 @@ extension AppDelegate: NSMenuDelegate {
         // Account row — drives one of 5 entitlement states.
         if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
             applyAccountRowState(account: acct, signOut: signOut)
+        }
+
+        // Sprint 2E L1.3 — Upgrade row visible only during active trial.
+        // PR #17 already styles the account row itself as a CTA when
+        // `.trialExpired`; this row covers the still-active 7-day window
+        // where the audit found no buy nudge.
+        if let upgrade = menu.item(withTag: 302) {
+            let entitlement: TrialState.Entitlement =
+                AuthService.shared.isSignedIn
+                    ? TrialState.shared.entitlement
+                    : .signedOut
+            upgrade.isHidden = (entitlement != .trialActive)
         }
 
         // Language submenu checkmarks
