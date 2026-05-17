@@ -37,11 +37,19 @@ class AppState: ObservableObject {
         } else {
             self.settings = AppSettings.defaults
         }
+        // Prime the network-status indicator with the persisted providers.
+        // Later mutations route through `saveSettings()` which re-refreshes.
+        NetworkStatusIndicator.shared.refresh(from: settings)
     }
 
     func saveSettings() {
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: AppState.settingsKey)
         }
+        // Re-derive the network indicator from the freshly-persisted state.
+        // The indicator is the source of truth for the recording overlay
+        // + menubar glyph — every settings mutation must update it so a
+        // user who flips LLM Provider sees the chip change immediately.
+        NetworkStatusIndicator.shared.refresh(from: settings)
     }
 }

@@ -22,6 +22,14 @@ struct SettingsView: View {
     @State private var showModelDownload = false
     @ObservedObject private var whisperManager = WhisperModelManager.shared
 
+    // Local LLM (Sprint 2F)
+    @State private var showLLMDownload = false
+    @State private var showLLMOnboarding = false
+    @ObservedObject private var llmManager = LLMModelManager.shared
+    /// Cached HardwareProbe result. Probed `.onAppear`, re-probed when the
+    /// user taps "Re-check" (so a post-RAM-upgrade user can flip from 🟡 to 🟢).
+    @State private var hardwareTier: HardwareProbe.Tier = .recommended
+
     // Trial state drives the Upgrade button in the About card (L3.2).
     // Live-refreshes the card so the button appears/disappears the moment
     // entitlement flips (trial → expired, trial → licensed after purchase).
@@ -41,6 +49,9 @@ struct SettingsView: View {
             dictionaryTab
                 .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
 
+            privacyTab
+                .tabItem { Label("Privacy", systemImage: "lock.shield") }
+
             generalTab
                 .tabItem { Label("General", systemImage: "gear") }
         }
@@ -48,6 +59,8 @@ struct SettingsView: View {
         .onAppear {
             loadKeys()
             whisperManager.refreshState(for: appState.settings.localWhisperModel)
+            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            hardwareTier = HardwareProbe.evaluate()
         }
         .alert("Settings Saved", isPresented: $showSavedAlert) {
             Button("OK", role: .cancel) {}
@@ -75,6 +88,30 @@ struct SettingsView: View {
                     }
                 }
             )
+        }
+        .sheet(isPresented: $showLLMDownload) {
+            LLMModelDownloadView(
+                spec: LocalLLMModelSpec.defaultSpec,
+                onDone: {
+                    showLLMDownload = false
+                },
+                onCancel: {
+                    showLLMDownload = false
+                    // Mirror the Whisper-sheet pattern: if the user
+                    // abandons a download they came here to do because
+                    // they'd already picked `.local`, flip the provider
+                    // back to Groq so Formal/Custom modes don't dead-end.
+                    if appState.settings.llmProvider.isLocal {
+                        appState.settings.llmProvider = .groq
+                        appState.saveSettings()
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showLLMOnboarding) {
+            LocalLLMOnboardingView(onClose: {
+                showLLMOnboarding = false
+            })
         }
     }
 
@@ -191,6 +228,250 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(localStatusBorder, lineWidth: 0.5)
         )
+    }
+
+    // MARK: - Local LLM status row (Sprint 2F)
+
+    /// "Local LLM" provider section shown when the user picks `.local`.
+    /// Mirrors the shape of `localWhisperStatus` so the two on-device
+    /// providers feel like one design system: hardware-eligibility badge,
+    /// model row with download/delete/cancel, and a missing-model warning
+    /// that's friendly rather than punitive.
+    ///
+    /// Decision references:
+    /// - 4-sub-A: model quality picker is a separate row gated by tier
+    ///   (Recommended unlocks; Eligible shows "1B only" + override hint).
+    /// - 5a / 5b / 5c: no cloud-fallback toggle. A user selecting `.local`
+    ///   gets local-only — switching providers is the one and only way to
+    ///   reach a cloud LLM. Honest copy reinforces this.
+    /// - 7a: HardwareProbe.Tier drives badge + latency expectation copy.
+    @ViewBuilder
+    private var localLLMStatus: some View {
+        let spec = LocalLLMModelSpec.defaultSpec
+
+        VStack(alignment: .leading, spacing: 10) {
+
+            // Hardware-eligibility badge — the same probe onboarding ran.
+            hardwareTierBadge
+
+            // Model row — mirrors localWhisperStatus styling.
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: llmStatusIconName)
+                    .foregroundStyle(llmStatusIconColor)
+                    .font(.system(size: 16))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(spec.displayName)
+                        .font(.system(.caption, design: .monospaced))
+                    Text(llmStatusSubline)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                switch llmManager.state {
+                case .ready:
+                    Button("Delete") {
+                        try? llmManager.deleteModel(spec)
+                    }
+                    .controlSize(.small)
+                case .downloading, .verifying:
+                    Button("Cancel") { llmManager.cancelDownload() }
+                        .controlSize(.small)
+                case .preparing:
+                    ProgressView().controlSize(.small)
+                default:
+                    Button("Download (\(formatBytes(spec.expectedSize)))") {
+                        showLLMDownload = true
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!hardwareTier.supportsLocalLLM)
+                }
+            }
+
+            // Decision 4-sub-A: model quality preset row. 1B is the only
+            // Phase 1 ship; 2B / 4B unlock when HardwareProbe = Recommended.
+            // The row stays visible at all tiers so users know what's
+            // possible — disabled when not eligible.
+            if hardwareTier.qualityPresetsUnlocked {
+                qualityPresetRow
+            } else if case .eligible = hardwareTier {
+                Text("Quality presets (Gemma 2 2B / Gemma 3 4B) unlock on 16 GB+ Macs.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            // Missing-model warning, same pattern as localWhisperStatus.
+            if shouldShowMissingLLMWarning {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Formal and Custom modes won't work until the AI model is downloaded.")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Default (Literal) mode keeps working — it doesn't use the LLM. Tap Download above when you're on Wi-Fi.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
+            }
+
+            // 5a/5b/5c honest copy: no fallback, no silent cloud egress.
+            // A user who picked Local explicitly should never be surprised
+            // by a cloud call they didn't authorise.
+            Text("Local LLM runs fully on your Mac. There is no cloud fallback — to use a cloud provider, switch the LLM Provider above. Your transcribed text never leaves the device while Local is selected.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .padding(.top, 2)
+
+            HStack {
+                Spacer()
+                Button("Guided setup") { showLLMOnboarding = true }
+                    .controlSize(.small)
+                    .font(.caption2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(localLLMStatusBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(localLLMStatusBorder, lineWidth: 0.5)
+        )
+    }
+
+    /// 🟢 Recommended / 🟡 Eligible / 🔴 Not supported badge + latency copy.
+    /// "Re-check" lets a user who upgraded RAM flip from 🟡 → 🟢 without
+    /// quitting the app (agenda Decision 7a requirement).
+    @ViewBuilder
+    private var hardwareTierBadge: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(hardwareTierEmoji)
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your Mac: \(hardwareTier.displayLabel)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(hardwareTier.latencyExpectationCopy)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Re-check") {
+                hardwareTier = HardwareProbe.evaluate()
+            }
+            .controlSize(.small)
+            .font(.caption2)
+        }
+    }
+
+    /// Quality preset picker (Recommended tier only). Phase 1 ships 1B as
+    /// the only spec; 2B / 4B labels show as disabled placeholders so the
+    /// UI is honest about what's coming without committing the bytes yet.
+    @ViewBuilder
+    private var qualityPresetRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Local model quality")
+                .font(.caption).foregroundColor(.secondary)
+            Picker("", selection: Binding(
+                get: { appState.settings.localLLMModel },
+                set: { newValue in
+                    appState.settings.localLLMModel = newValue
+                    appState.saveSettings()
+                    // Future P2-LLM expansion: refreshState for the
+                    // newly-selected spec. Phase 1 ships one spec.
+                }
+            )) {
+                Text("Gemma 3 1B (Q4_K_M) — 0.8 GB")
+                    .tag(LocalLLMModelSpec.defaultSpec.id)
+                Text("Gemma 2 2B — coming soon")
+                    .tag("gemma-2-2b-it-q4_k_m")
+                Text("Gemma 3 4B — coming soon")
+                    .tag("gemma-3-4b-it-q4_k_m")
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .disabled(true)  // Phase 1: single spec; 2B/4B unlock in a follow-up sprint.
+
+            Text("More Gemma sizes will ship as quality presets — Phase 1 starts with 1B.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var hardwareTierEmoji: String {
+        switch hardwareTier {
+        case .recommended:   return "🟢"
+        case .eligible:      return "🟡"
+        case .notSupported:  return "🔴"
+        }
+    }
+
+    private var llmStatusIconName: String {
+        switch llmManager.state {
+        case .ready:                    return "checkmark.circle.fill"
+        case .downloading, .verifying,
+             .preparing:                return "arrow.down.circle"
+        case .failed:                   return "exclamationmark.octagon.fill"
+        default:                        return "circle.dashed"
+        }
+    }
+
+    private var llmStatusIconColor: Color {
+        switch llmManager.state {
+        case .ready:                    return .green
+        case .downloading, .verifying,
+             .preparing:                return .blue
+        case .failed:                   return .red
+        default:                        return .secondary
+        }
+    }
+
+    private var llmStatusSubline: String {
+        switch llmManager.state {
+        case .unknown:                  return "Status not checked yet."
+        case .absent:                   return "Not downloaded."
+        case .downloading(let p):       return "Downloading… \(Int(p * 100))%"
+        case .verifying:                return "Verifying integrity (SHA-256)…"
+        case .preparing:                return "Preparing model…"
+        case .ready(_, let sizeBytes):  return "Ready · \(formatBytes(sizeBytes)) on disk"
+        case .failed(let err):          return err.errorDescription ?? "Setup failed."
+        }
+    }
+
+    private var shouldShowMissingLLMWarning: Bool {
+        // Mirror the local-Whisper guard: only warn when the user has
+        // actively chosen `.local` AND the model isn't ready.
+        guard appState.settings.llmProvider.isLocal else { return false }
+        if case .ready = llmManager.state { return false }
+        if llmManager.state.isBusy { return false }
+        return true
+    }
+
+    private var localLLMStatusBackground: Color {
+        shouldShowMissingLLMWarning
+            ? Color.orange.opacity(0.06)
+            : Color.secondary.opacity(0.06)
+    }
+
+    private var localLLMStatusBorder: Color {
+        shouldShowMissingLLMWarning
+            ? Color.orange.opacity(0.4)
+            : Color.secondary.opacity(0.2)
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
     /// Warning background when the user's staring at a non-functional
@@ -490,6 +771,8 @@ struct SettingsView: View {
                                     labeledField("Gemini Model", text: $appState.settings.googleModel)
                                 case .openai:
                                     labeledField("OpenAI Model", text: $appState.settings.openAILLMModel)
+                                case .local:
+                                    localLLMStatus
                                 }
                             }
 
@@ -758,6 +1041,106 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Privacy Tab (Sprint 2F)
+
+    /// Static + live disclosure of what Sprich does and doesn't do with the
+    /// network. Honest backstop to the recording-overlay indicator: when a
+    /// curious user opens Settings to verify the "fully local" claim, this
+    /// is the page that has to be true and complete.
+    ///
+    /// Spec: `~/Claude/40_Projects/Sprich/network-off-proof-ui-spec.md`
+    /// § Surface 3.
+    @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
+
+    private var privacyTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+
+                card {
+                    sectionHeader("Network status")
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(networkIndicator.route.glyph)
+                            .font(.system(size: 22))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(networkIndicator.route.shortLabel)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(networkIndicator.route.tooltip)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(networkIndicator.route == .offline
+                                ? Color.green.opacity(0.08)
+                                : Color.orange.opacity(0.08))
+                    )
+
+                    Text("Sprich shows this indicator live on the recording overlay too — green means the dictation runs without any network call this session.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                card {
+                    sectionHeader("What Sprich never sends")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Audio recordings — held in memory, never written to disk, never uploaded.", systemImage: "checkmark")
+                            .font(.caption)
+                        Label("Analytics or telemetry — zero SDKs linked, no event beacons.", systemImage: "checkmark")
+                            .font(.caption)
+                        Label("Dictation content to Sprich's servers — our endpoints don't accept transcripts at all.", systemImage: "checkmark")
+                            .font(.caption)
+                        Label("Auto-update probes — Sprich doesn't ship an auto-updater.", systemImage: "checkmark")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.secondary)
+                }
+
+                card {
+                    sectionHeader("Full network-call inventory")
+                    Text("Every outbound call Sprich makes is documented in plain language. If you find a call we haven't disclosed, please email support@sprichapp.com — we'd consider it a bug.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Button("Read the network-call inventory") {
+                            if let url = URL(string: "https://sprichapp.com/network-calls") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .controlSize(.small)
+                        Spacer()
+                    }
+                    .padding(.top, 4)
+                }
+
+                card {
+                    sectionHeader("AI model attribution")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Speech-to-text uses Whisper (OpenAI), running on-device via WhisperKit.")
+                            .font(.caption)
+                        Text("Local AI cleanup uses Gemma 3 by Google, running on-device via llama.cpp.")
+                            .font(.caption)
+                        Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .padding(.top, 4)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(18)
+        }
+    }
+
     // MARK: - General Tab
 
     private var generalTab: some View {
@@ -932,6 +1315,12 @@ struct SettingsView: View {
         case .claude, .google, .openai:
             guard let v = KeychainManager.retrieve(key: provider.keychainKey) else { return false }
             return !v.isEmpty
+        case .local:
+            // Local LLM needs a model on disk, not a key. The model-readiness
+            // check is owned by `LLMModelManager.state` (P2-LLM-05) and the
+            // Settings "Local LLM" section reads it directly; the
+            // missing-key banner never applies.
+            return true
         }
     }
 

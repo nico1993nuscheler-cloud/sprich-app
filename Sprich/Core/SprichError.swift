@@ -11,6 +11,7 @@ enum SprichError: LocalizedError {
     case emptyLLMResponse
     case recordingFailed(String)
     case permissionDenied(String)
+    case localLLMNotReady(String)
 
     var errorDescription: String? { userFacingMessage }
 
@@ -53,6 +54,8 @@ enum SprichError: LocalizedError {
             return "Recording failed: \(detail)"
         case .permissionDenied(let permission):
             return "\(permission) permission denied. Open System Settings to grant access."
+        case .localLLMNotReady(let detail):
+            return "Local LLM is not ready: \(detail)"
         }
     }
 }

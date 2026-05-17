@@ -24,6 +24,9 @@
 		A10000015 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000015 /* SettingsView.swift */; };
 		A10000016 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000016 /* OnboardingView.swift */; };
 		A10000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Assets.xcassets */; };
+		A10000047 /* NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = B10000048 /* NOTICE.txt */; };
+		A10000048 /* LocalLLMOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000049 /* LocalLLMOnboardingView.swift */; };
+		A10000051 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000050 /* LocalLLMService.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
 		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022 /* TextPostProcessor.swift */; };
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023 /* ShortcutHelpView.swift */; };
@@ -34,6 +37,8 @@
 		A10000025 /* PCMConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000028 /* PCMConverter.swift */; };
 		A10000026 /* ModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000029 /* ModelDownloadView.swift */; };
 		A10000027 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = H10000001 /* WhisperKit */; };
+		A10000049 /* LocalLLMClient in Frameworks */ = {isa = PBXBuildFile; productRef = H10000002 /* LocalLLMClient */; };
+		A10000050 /* LocalLLMClientLlama in Frameworks */ = {isa = PBXBuildFile; productRef = H10000003 /* LocalLLMClientLlama */; };
 		A10000028 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* NetworkReachability.swift */; };
 		A10000029 /* WhisperModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000031 /* WhisperModelCatalog.swift */; };
 		A10000030 /* ModeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000032 /* ModeTokens.swift */; };
@@ -46,6 +51,12 @@
 		A10000037 /* SignInPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000039 /* SignInPanel.swift */; };
 		A10000040 /* UpgradeNagPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000041 /* UpgradeNagPanel.swift */; };
 		A10000038 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000040 /* AccountView.swift */; };
+		A10000041 /* HardwareProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000042 /* HardwareProbe.swift */; };
+		A10000042 /* LocalLLMModelSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000043 /* LocalLLMModelSpec.swift */; };
+		A10000043 /* SystemPromptCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000044 /* SystemPromptCatalog.swift */; };
+		A10000044 /* LLMModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000045 /* LLMModelManager.swift */; };
+		A10000045 /* LLMModelDownloadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000046 /* LLMModelDownloadView.swift */; };
+		A10000046 /* NetworkStatusIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000047 /* NetworkStatusIndicator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -90,6 +101,15 @@
 		B10000039 /* SignInPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInPanel.swift; sourceTree = "<group>"; };
 		B10000041 /* UpgradeNagPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpgradeNagPanel.swift; sourceTree = "<group>"; };
 		B10000040 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
+		B10000042 /* HardwareProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareProbe.swift; sourceTree = "<group>"; };
+		B10000043 /* LocalLLMModelSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMModelSpec.swift; sourceTree = "<group>"; };
+		B10000044 /* SystemPromptCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPromptCatalog.swift; sourceTree = "<group>"; };
+		B10000045 /* LLMModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMModelManager.swift; sourceTree = "<group>"; };
+		B10000046 /* LLMModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMModelDownloadView.swift; sourceTree = "<group>"; };
+		B10000047 /* NetworkStatusIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatusIndicator.swift; sourceTree = "<group>"; };
+		B10000048 /* NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NOTICE.txt; sourceTree = "<group>"; };
+		B10000049 /* LocalLLMOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMOnboardingView.swift; sourceTree = "<group>"; };
+		B10000050 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -98,6 +118,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000027 /* WhisperKit in Frameworks */,
+				A10000049 /* LocalLLMClient in Frameworks */,
+				A10000050 /* LocalLLMClientLlama in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -119,6 +141,7 @@
 				B10000018 /* Info.plist */,
 				B10000019 /* Sprich.entitlements */,
 				B10000017 /* Assets.xcassets */,
+				B10000048 /* NOTICE.txt */,
 				D10000003 /* Core */,
 				D10000004 /* Models */,
 				D10000005 /* Security */,
@@ -141,11 +164,25 @@
 				B10000022 /* TextPostProcessor.swift */,
 				B10000025 /* SurfaceDetector.swift */,
 				B10000030 /* NetworkReachability.swift */,
+				B10000042 /* HardwareProbe.swift */,
+				B10000047 /* NetworkStatusIndicator.swift */,
 				D10000009 /* ASR */,
 				D10000010 /* Auth */,
 				D10000011 /* Trial */,
+				D10000012 /* LLM */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		D10000012 /* LLM */ = {
+			isa = PBXGroup;
+			children = (
+				B10000043 /* LocalLLMModelSpec.swift */,
+				B10000044 /* SystemPromptCatalog.swift */,
+				B10000045 /* LLMModelManager.swift */,
+				B10000050 /* LocalLLMService.swift */,
+			);
+			path = LLM;
 			sourceTree = "<group>";
 		};
 		D10000010 /* Auth */ = {
@@ -195,6 +232,8 @@
 				B10000023 /* ShortcutHelpView.swift */,
 				B10000021 /* RecordingOverlay.swift */,
 				B10000029 /* ModelDownloadView.swift */,
+				B10000046 /* LLMModelDownloadView.swift */,
+				B10000049 /* LocalLLMOnboardingView.swift */,
 				B10000037 /* SignInView.swift */,
 				B10000039 /* SignInPanel.swift */,
 				B10000038 /* TrialLockView.swift */,
@@ -241,6 +280,8 @@
 			name = Sprich;
 			packageProductDependencies = (
 				H10000001 /* WhisperKit */,
+				H10000002 /* LocalLLMClient */,
+				H10000003 /* LocalLLMClientLlama */,
 			);
 			productName = Sprich;
 			productReference = B10000020 /* Sprich.app */;
@@ -272,6 +313,7 @@
 			mainGroup = D10000001;
 			packageReferences = (
 				G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
+				G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */,
 			);
 			productRefGroup = D10000008 /* Products */;
 			projectDirPath = "";
@@ -288,6 +330,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000017 /* Assets.xcassets in Resources */,
+				A10000047 /* NOTICE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -335,6 +378,14 @@
 				A10000036 /* TrialLockView.swift in Sources */,
 				A10000040 /* UpgradeNagPanel.swift in Sources */,
 				A10000038 /* AccountView.swift in Sources */,
+				A10000041 /* HardwareProbe.swift in Sources */,
+				A10000042 /* LocalLLMModelSpec.swift in Sources */,
+				A10000043 /* SystemPromptCatalog.swift in Sources */,
+				A10000044 /* LLMModelManager.swift in Sources */,
+				A10000045 /* LLMModelDownloadView.swift in Sources */,
+				A10000046 /* NetworkStatusIndicator.swift in Sources */,
+				A10000048 /* LocalLLMOnboardingView.swift in Sources */,
+				A10000051 /* LocalLLMService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -374,6 +425,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = Sprich/Sprich.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -391,6 +444,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -422,6 +476,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = Sprich/Sprich.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
@@ -439,6 +495,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -471,8 +528,16 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/argmaxinc/argmax-oss-swift";
 			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+		G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tattn/LocalLLMClient";
+			requirement = {
 				kind = upToNextMinorVersion;
-				minimumVersion = 0.18.0;
+				minimumVersion = 0.5.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -482,6 +547,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
 			productName = WhisperKit;
+		};
+		H10000002 /* LocalLLMClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */;
+			productName = LocalLLMClient;
+		};
+		H10000003 /* LocalLLMClientLlama */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */;
+			productName = LocalLLMClientLlama;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

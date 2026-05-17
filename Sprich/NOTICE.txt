@@ -1,0 +1,30 @@
+Sprich — Third-party notice file
+
+This file accompanies the Sprich macOS application (Distribution) as required by
+the applicable third-party licenses. Sprich's own source license is BUSL 1.1
+(see LICENSE).
+
+================================================================================
+Gemma 3 (Google) — used as the on-device cleanup model for Formal and Custom
+modes when the user has selected the Local LLM provider.
+
+Required notice per Gemma Terms of Use § 3.1(4):
+
+    Gemma is provided under and subject to the Gemma Terms of Use found at
+    ai.google.dev/gemma/terms
+
+The model weights are downloaded on the user's machine from
+huggingface.co/bartowski/google_gemma-3-1b-it-GGUF, pinned to a specific
+revision. Sprich does not bundle or modify the Gemma weights.
+
+================================================================================
+Whisper (OpenAI) — used as the on-device speech-to-text model.
+
+WhisperKit (https://github.com/argmaxinc/argmax-oss-swift) — MIT license.
+Whisper model weights are downloaded from
+huggingface.co/argmaxinc/whisperkit-coreml.
+
+================================================================================
+llama.cpp (ggerganov) — local LLM inference runtime, integrated via the Swift
+package https://github.com/srgtuszy/llama-cpp-swift (MIT license).
+Source: https://github.com/ggerganov/llama.cpp (MIT license).
