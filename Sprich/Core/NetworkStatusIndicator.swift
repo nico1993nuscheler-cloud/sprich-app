@@ -108,14 +108,26 @@ final class NetworkStatusIndicator: ObservableObject {
     /// Call this whenever `AppSettings.sttProvider` or `.llmProvider`
     /// changes — `AppState.saveSettings()` already runs on every mutation
     /// so this can sit on the same code path.
+    ///
+    /// Deferred to the next runloop tick because `saveSettings` is invoked
+    /// from inside SwiftUI view-binding mutations (provider picker, etc.).
+    /// Mutating a `@Published` synchronously from inside a view update
+    /// triggers the "Publishing changes from within view updates is not
+    /// allowed" SwiftUI warning seen in QA 2026-05-17. Same pattern
+    /// `WhisperModelManager.markPipeReady` uses at lines 64-68 for the
+    /// identical reason.
     func refresh(from settings: AppSettings) {
-        // Don't clobber an in-flight license heartbeat — restore happens
-        // in `endLicenseHeartbeat` instead.
-        if case .licenseHeartbeat = route {
-            routeBeforeHeartbeat = Self.derive(from: settings)
-            return
+        let next = Self.derive(from: settings)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Don't clobber an in-flight license heartbeat — restore
+            // happens in `endLicenseHeartbeat` instead.
+            if case .licenseHeartbeat = self.route {
+                self.routeBeforeHeartbeat = next
+                return
+            }
+            self.route = next
         }
-        route = Self.derive(from: settings)
     }
 
     /// Called by `PipelineCoordinator` at dictation start.

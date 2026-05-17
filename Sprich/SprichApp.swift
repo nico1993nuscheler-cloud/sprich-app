@@ -90,6 +90,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // auto-download on launch — the ~626 MB is opt-in in Settings.
         prewarmLocalWhisperIfReady()
 
+        // Sprint 2F follow-up — same idea for the local LLM. Without this,
+        // the first Formal-mode dictation after install pays a 14–15 s
+        // Metal-shader JIT compile (logged as `[Sprich][LocalLLM] prewarm ✅
+        // in 14854 ms` in QA 2026-05-17). Cached afterwards by macOS, but
+        // the first user impression matters. Only fires when `.local` is
+        // already the active LLM provider AND the model is on disk — never
+        // auto-downloads.
+        LocalLLMService.prewarmIfReady(settings: appState.settings)
+
         // Auth + trial bootstrap. If a session is already in Keychain we
         // hit validate-trial in the background; if not, we show the
         // sign-in window (after onboarding for first-run, immediately

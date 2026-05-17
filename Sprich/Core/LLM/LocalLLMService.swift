@@ -47,6 +47,40 @@ actor LocalLLMService {
         }
     }
 
+    /// App-launch trigger: if the user has `.local` selected AND the model
+    /// is already on disk, kick off the llama.cpp + Metal-shader compile in
+    /// the background. Without this, the first Formal-mode dictation after
+    /// install pays a 14–15 s freeze for Metal shader JIT compilation —
+    /// macOS caches the compiled shaders in `~/Library/Caches/com.apple.metal/`
+    /// so subsequent launches are fast, but the first user dictation is
+    /// the worst place to surface a cold-load.
+    ///
+    /// Mirrors the WhisperKit pattern at
+    /// `TranscriptionService.prewarmLocalWhisperIfReady` and is called
+    /// alongside it from `SprichApp.applicationDidFinishLaunching`.
+    @MainActor
+    static func prewarmIfReady(settings: AppSettings) {
+        // Touch `shared` so the actor's init runs and the prewarmHook +
+        // background-unload observers install BEFORE any download flow
+        // tries to call the hook.
+        let service = LocalLLMService.shared
+        guard settings.llmProvider.isLocal else { return }
+        let spec = LocalLLMModelSpec.defaultSpec
+        guard let modelFile = LLMModelManager.shared.existingFile(for: spec) else { return }
+        Task.detached(priority: .userInitiated) {
+            do {
+                try await service.prewarm(spec: spec, modelFile: modelFile)
+                #if DEBUG
+                print("[Sprich] Local LLM warm (\(spec.id))")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Sprich] Local LLM warm failed: \(error)")
+                #endif
+            }
+        }
+    }
+
     // MARK: - Prewarm
 
     /// Loads the GGUF and instantiates `LlamaClient`. Safe to call repeatedly
