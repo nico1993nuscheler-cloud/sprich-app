@@ -172,6 +172,7 @@ class RecordingOverlayState: ObservableObject {
 
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
+    @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
 
     private var accent: Color { state.mode.accentColor }
 
@@ -206,6 +207,13 @@ struct RecordingOverlayView: View {
             )
             .fixedSize()  // shrink Capsule to intrinsic content width
 
+            // Network-status chip — Sprint 2F P2-LLM-14. Tells the user, in
+            // real time, whether THIS dictation will touch the network.
+            // 🟢 Offline = both STT + LLM are local; 🟡 = at least one leg
+            // uses the cloud. Spec: `network-off-proof-ui-spec.md` Surface 1.
+            networkStatusChip
+                .transition(.opacity)
+
             // Transcribed text bubble (appears after STT, before LLM cleanup)
             if let text = state.transcribedText, !text.isEmpty {
                 Text(text)
@@ -231,6 +239,55 @@ struct RecordingOverlayView: View {
         .animation(.easeOut(duration: 0.15), value: state.phase == .cleaning)
         .animation(.easeOut(duration: 0.15), value: state.transcribedText)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Small pill that names the configured network state for this
+    /// dictation. Green = 🟢 Offline; amber = 🟡 + provider name; ⚪ for the
+    /// brief license-heartbeat window. Honest by construction: derives
+    /// directly from `NetworkStatusIndicator.shared.route`.
+    @ViewBuilder
+    private var networkStatusChip: some View {
+        HStack(spacing: 6) {
+            Text(networkIndicator.route.glyph)
+                .font(.system(size: 11))
+            Text(networkIndicator.route.shortLabel)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(networkChipTextColor)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(networkChipBackground)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(networkChipBorder, lineWidth: 0.5)
+        )
+    }
+
+    private var networkChipBackground: Color {
+        switch networkIndicator.route {
+        case .offline:           return Color.green.opacity(0.12)
+        case .licenseHeartbeat:  return Color.secondary.opacity(0.10)
+        default:                 return Color.orange.opacity(0.12)
+        }
+    }
+
+    private var networkChipBorder: Color {
+        switch networkIndicator.route {
+        case .offline:           return Color.green.opacity(0.35)
+        case .licenseHeartbeat:  return Color.secondary.opacity(0.25)
+        default:                 return Color.orange.opacity(0.35)
+        }
+    }
+
+    private var networkChipTextColor: Color {
+        switch networkIndicator.route {
+        case .offline:           return Color.green.opacity(0.85)
+        case .licenseHeartbeat:  return Color.secondary
+        default:                 return Color.orange.opacity(0.85)
+        }
     }
 }
 

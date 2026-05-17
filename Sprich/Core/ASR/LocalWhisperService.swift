@@ -191,7 +191,8 @@ actor LocalWhisperService {
             temperatureFallbackCount: 0,
             topK: 1,
             usePrefillPrompt: true,
-            usePrefillCache: true,
+            // `usePrefillCache` removed in WhisperKit v1.0.0 — the cache
+            // behavior is now always-on. (P2-LLM-06 upgrade.)
             detectLanguage: language == nil,
             skipSpecialTokens: true,
             withoutTimestamps: true,

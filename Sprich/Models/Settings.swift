@@ -48,8 +48,14 @@ enum LLMProviderType: String, Codable, CaseIterable {
     case claude = "Claude (Anthropic)"
     case google = "Gemini (Google)"
     case openai = "OpenAI"
+    case local = "Local (offline)"
 
     var displayName: String { rawValue }
+
+    /// True when this provider runs entirely on-device and needs no API key.
+    /// Mirrors `STTProviderType.local`'s shape — readiness of the model bytes
+    /// on disk is tracked separately by `LLMModelManager`.
+    var isLocal: Bool { self == .local }
 
     var keychainKey: String {
         switch self {
@@ -57,6 +63,7 @@ enum LLMProviderType: String, Codable, CaseIterable {
         case .claude: return "sprich.api.anthropic"
         case .google: return "sprich.api.google"
         case .openai: return "sprich.api.openai"
+        case .local: return ""
         }
     }
 
@@ -66,6 +73,7 @@ enum LLMProviderType: String, Codable, CaseIterable {
         case .claude: return "https://console.anthropic.com/settings/billing"
         case .google: return "https://aistudio.google.com/apikey"
         case .openai: return "https://platform.openai.com/account/billing"
+        case .local: return ""
         }
     }
 }
@@ -145,15 +153,23 @@ struct AppSettings: Codable {
     /// Resolved at runtime by `WhisperModelManager`.
     var localWhisperModel: String
 
+    /// Local LLM model spec ID for the on-device offline provider.
+    /// Resolved at runtime by `LLMModelManager`. The spec ID encodes
+    /// model + container + quant — e.g. `"gemma-3-1b-it-q4_k_m"`.
+    var localLLMModel: String
+
     var hasRequiredAPIKeys: Bool {
         // Local STT runs on-device — it needs a downloaded model, not a key.
-        // Readiness of the local model is tracked separately by WhisperModelManager
-        // so onboarding doesn't treat "no key" as a failure for local.
+        // Local LLM is the same shape: no key required, readiness of the
+        // model bytes on disk is tracked separately by LLMModelManager so
+        // onboarding doesn't treat "no key" as a failure for local providers.
         let sttOK = sttProvider.isLocal
             ? true
             : (KeychainManager.retrieve(key: sttProvider.keychainKey) != nil)
-        let llmKey = KeychainManager.retrieve(key: llmProvider.keychainKey)
-        return sttOK && llmKey != nil
+        let llmOK = llmProvider.isLocal
+            ? true
+            : (KeychainManager.retrieve(key: llmProvider.keychainKey) != nil)
+        return sttOK && llmOK
     }
 
     func promptForMode(_ mode: TranscriptionMode) -> String {
@@ -206,6 +222,7 @@ struct AppSettings: Codable {
         self.maxRecordingDuration = (try? c.decode(Int.self,             forKey: .maxRecordingDuration)) ?? d.maxRecordingDuration
         self.adaptToSurface       = (try? c.decode(Bool.self,            forKey: .adaptToSurface))       ?? d.adaptToSurface
         self.localWhisperModel    = (try? c.decode(String.self,          forKey: .localWhisperModel))    ?? d.localWhisperModel
+        self.localLLMModel        = (try? c.decode(String.self,          forKey: .localLLMModel))        ?? d.localLLMModel
     }
 
     // Memberwise init is suppressed once we declare `init(from:)`, so
@@ -229,7 +246,8 @@ struct AppSettings: Codable {
         inputMode: InputMode,
         maxRecordingDuration: Int,
         adaptToSurface: Bool,
-        localWhisperModel: String
+        localWhisperModel: String,
+        localLLMModel: String
     ) {
         self.sttProvider = sttProvider
         self.llmProvider = llmProvider
@@ -250,6 +268,7 @@ struct AppSettings: Codable {
         self.maxRecordingDuration = maxRecordingDuration
         self.adaptToSurface = adaptToSurface
         self.localWhisperModel = localWhisperModel
+        self.localLLMModel = localLLMModel
     }
 
     static var defaults: AppSettings {
@@ -278,7 +297,14 @@ struct AppSettings: Codable {
             // but with OpenAI's pruned turbo decoder (8 layers vs 32)
             // for ~2× faster inference. User can swap to Fast or
             // Accurate in Settings → Providers → Local.
-            localWhisperModel: WhisperModelCatalog.balanced.variantName
+            localWhisperModel: WhisperModelCatalog.balanced.variantName,
+            // Default local LLM spec — Gemma 3 1B-it, GGUF Q4_K_M.
+            // The factory default LLM provider stays `.groq` until
+            // onboarding (Sprint 2F Decision 8 / option C) flips a
+            // user to `.local` after a successful HardwareProbe pass
+            // + completed model download. Picking `.local` here would
+            // hard-fail every first-launch on Intel / pre-download.
+            localLLMModel: LocalLLMModelSpec.defaultSpec.id
         )
     }
 }

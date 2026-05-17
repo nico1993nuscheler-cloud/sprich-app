@@ -452,7 +452,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let header = NSMenuItem(title: "Ready", action: nil, keyEquivalent: "")
         header.tag = 100
         menu.addItem(header)
+
+        // Sprint 2F P2-LLM-14 — network-status info row (tag 101).
+        // Always-visible truthful indicator of what THIS Mac's next
+        // dictation will / won't send to the network. Live-updates via
+        // the Combine sink set up below.
+        let networkRow = NSMenuItem(title: "🟢 Offline", action: nil, keyEquivalent: "")
+        networkRow.tag = 101
+        networkRow.toolTip = NetworkStatusIndicator.shared.route.tooltip
+        menu.addItem(networkRow)
         menu.addItem(NSMenuItem.separator())
+
+        // Live-refresh menubar network row when settings change provider.
+        NetworkStatusIndicator.shared.$route
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] route in
+                guard let item = self?.statusItem.menu?.item(withTag: 101) else { return }
+                item.title = "\(route.glyph) \(route.shortLabel)"
+                item.toolTip = route.tooltip
+            }
+            .store(in: &appState.cancellables)
 
         // Account row (tag 300) + sign-out (tag 301). Title + styling are
         // rebuilt live in `refreshDynamicMenuItems` to reflect auth +
