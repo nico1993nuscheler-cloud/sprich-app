@@ -101,6 +101,21 @@ class LLMService {
                 userMessage: sanitizedText,
                 model: settings.openAILLMModel
             )
+        case .local:
+            // On-device cleanup via llama.cpp + Gemma 3 1B-it Q4_K_M.
+            // Decision 5a/5b/5c: there is NO cloud fallback in this branch
+            // — if `LocalLLMService` fails, the error surfaces to the user
+            // and Settings is the only path back to a cloud provider.
+            //
+            // Pass `rawText` not `sanitizedText` — `LocalLLMService.cleanup`
+            // runs its own `InputSanitizer.sanitize`, and we don't want the
+            // local path to be a thin shim over already-sanitized text.
+            return try await LocalLLMService.shared.cleanup(
+                rawText: rawText,
+                mode: mode,
+                settings: settings,
+                surface: surface
+            )
         }
     }
 
