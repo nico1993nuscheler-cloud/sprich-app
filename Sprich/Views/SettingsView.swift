@@ -1,7 +1,57 @@
 import SwiftUI
 
+/// Sprint 3 IA: sidebar (NavigationSplitView), 6 sections.
+///
+/// `SettingsSection` is the deep-link target for `MissingKeyBanner`'s
+/// "Open Settings → AI cleanup" CTA (P1-UX-14). The banner posts a
+/// `.sprichOpenSettingsSection` notification carrying the section to
+/// route to; `SettingsView` listens and updates `selection`.
+enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
+    case account
+    case aiModels
+    case modes
+    case general
+    case privacy
+    case about
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .account:   return "Account"
+        case .aiModels:  return "AI Models"
+        case .modes:     return "Modes"
+        case .general:   return "General"
+        case .privacy:   return "Privacy"
+        case .about:     return "About"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .account:   return "person.crop.circle"
+        case .aiModels:  return "brain"
+        case .modes:     return "text.quote"
+        case .general:   return "gear"
+        case .privacy:   return "lock.shield"
+        case .about:     return "info.circle"
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Posted by `MissingKeyBanner` (and any other deep-link source) to
+    /// route the Settings window to a specific section. UserInfo carries
+    /// the `SettingsSection` raw value under key `"section"`.
+    static let sprichOpenSettingsSection = Notification.Name("SprichOpenSettingsSection")
+}
+
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+
+    // Sidebar selection (P1-UX-01). Defaults to AI Models — the
+    // load-bearing page where most users start.
+    @State private var selection: SettingsSection = .aiModels
 
     // Local state for API key fields (read from Keychain on appear)
     @State private var groqKey = ""
@@ -36,26 +86,37 @@ struct SettingsView: View {
     @StateObject private var trial = TrialState.shared
 
     var body: some View {
-        TabView {
-            apiKeysTab
-                .tabItem { Label("API Keys", systemImage: "key") }
-
-            providersTab
-                .tabItem { Label("Providers", systemImage: "server.rack") }
-
-            modesTab
-                .tabItem { Label("Modes", systemImage: "text.quote") }
-
-            dictionaryTab
-                .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
-
-            privacyTab
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selection) { section in
+                NavigationLink(value: section) {
+                    Label(section.displayName, systemImage: section.iconName)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 200)
+            .listStyle(.sidebar)
+        } detail: {
+            // Each section is wired ticket-by-ticket. The shell (this ticket,
+            // P1-UX-01) lands a placeholder for every section so navigation
+            // works end-to-end; P1-UX-03 through P1-UX-12 replace them.
+            Group {
+                switch selection {
+                case .account:   sectionPlaceholder(.account)
+                case .aiModels:  sectionPlaceholder(.aiModels)
+                case .modes:     sectionPlaceholder(.modes)
+                case .general:   sectionPlaceholder(.general)
+                case .privacy:   sectionPlaceholder(.privacy)
+                case .about:     sectionPlaceholder(.about)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 620, height: 620)
+        .frame(width: 760, height: 620)
+        .onReceive(NotificationCenter.default.publisher(for: .sprichOpenSettingsSection)) { note in
+            if let raw = note.userInfo?["section"] as? String,
+               let section = SettingsSection(rawValue: raw) {
+                selection = section
+            }
+        }
         .onAppear {
             loadKeys()
             whisperManager.refreshState(for: appState.settings.localWhisperModel)
@@ -547,6 +608,31 @@ struct SettingsView: View {
         case .absent, .unknown:
             return "Not downloaded — dictation will not work"
         }
+    }
+
+    // MARK: - Section placeholder (P1-UX-01 shell — replaced ticket-by-ticket)
+
+    /// Stand-in detail view shown while a section hasn't been wired up to
+    /// its real content yet. Each subsequent ticket (P1-UX-03..P1-UX-12)
+    /// swaps one of these out for the redesigned section.
+    @ViewBuilder
+    private func sectionPlaceholder(_ section: SettingsSection) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: section.iconName)
+                    .font(.system(size: 24))
+                    .foregroundStyle(.secondary)
+                Text(section.displayName)
+                    .font(.title2).fontWeight(.semibold)
+            }
+            Text("This section is being redesigned (Sprint 3). Your existing settings still apply at dictation time — the editor UI returns in the next build.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: - Shared helpers
