@@ -747,8 +747,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp() {
+        // Soft-shutdown sequence — see `gracefulShutdown(reason:)` for why.
+        gracefulShutdown(reason: "menubar Quit")
+    }
+
+    /// Triggered when macOS asks us to terminate by any path other than our
+    /// own menubar Quit — Cmd+Q from any window, Force Quit dialog, Apple
+    /// menu "Quit Sprich", logout, system shutdown. We hook this so the
+    /// graceful-shutdown sequence runs regardless of how the user quits.
+    func applicationWillTerminate(_ notification: Notification) {
+        // If `quitApp` already ran (menubar path), we've already unloaded.
+        // Mark idempotent via a guard inside the helper.
+        gracefulShutdownIfNeeded()
+    }
+
+    private var didStartGracefulShutdown = false
+
+    /// Drop the local llama.cpp context BEFORE NSApp.terminate completes.
+    /// QA 2026-05-18 hit a hard deadlock (rainbow wheel → Force Quit) when
+    /// llama.cpp's Metal context tore down concurrently with AppKit's
+    /// terminate flow. Letting the actor release the client first gives
+    /// Metal a clean shutdown.
+    ///
+    /// Watchdog: if the soft-shutdown hasn't completed in 1.5 s, hard-exit
+    /// via `exit(0)`. 1.5 s is well above the expected unload latency
+    /// (~50 ms) but below a user's "is it stuck?" threshold. Worst case
+    /// for the user: a slow Quit that completes cleanly. Best case: no
+    /// hang at all.
+    private func gracefulShutdown(reason: String) {
+        guard !didStartGracefulShutdown else { return }
+        didStartGracefulShutdown = true
+
+        #if DEBUG
+        print("[Sprich] gracefulShutdown via \(reason) — unloading local LLM")
+        #endif
+
         hotkeyManager?.stop()
-        NSApp.terminate(nil)
+
+        let watchdog = DispatchWorkItem {
+            #if DEBUG
+            print("[Sprich] gracefulShutdown watchdog fired — hard exit")
+            #endif
+            exit(0)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: watchdog)
+
+        Task { @MainActor in
+            await LocalLLMService.shared.unload()
+            watchdog.cancel()
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Called from `applicationWillTerminate` to cover the non-menubar
+    /// quit paths. Idempotent against `quitApp`.
+    private func gracefulShutdownIfNeeded() {
+        guard !didStartGracefulShutdown else { return }
+        // We're already inside the terminate flow — can't call
+        // NSApp.terminate again. Just unload synchronously-ish and let
+        // AppKit continue. Watchdog still applies in case llama.cpp's
+        // deinit deadlocks.
+        didStartGracefulShutdown = true
+        let watchdog = DispatchWorkItem { exit(0) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: watchdog)
+        Task { @MainActor in
+            await LocalLLMService.shared.unload()
+            watchdog.cancel()
+        }
     }
 
     @objc private func handleAccountClick() {
