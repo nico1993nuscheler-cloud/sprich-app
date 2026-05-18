@@ -100,7 +100,7 @@ struct SettingsView: View {
             // works end-to-end; P1-UX-03 through P1-UX-12 replace them.
             Group {
                 switch selection {
-                case .account:   sectionPlaceholder(.account)
+                case .account:   AccountSection()
                 case .aiModels:  sectionPlaceholder(.aiModels)
                 case .modes:     sectionPlaceholder(.modes)
                 case .general:   sectionPlaceholder(.general)
@@ -1458,5 +1458,158 @@ struct SettingsView: View {
         if !googleKey.isEmpty {
             KeychainManager.store(key: LLMProviderType.google.keychainKey, value: googleKey)
         }
+    }
+}
+
+// MARK: - AccountSection (P1-UX-03)
+
+/// Sidebar section: email + trial state + Sign out + Upgrade link.
+/// Fixes UX audit P0 #7 by giving the signed-in user a real destination
+/// inside Settings rather than the re-sign-in panel they used to land on
+/// when clicking the menubar Account row.
+private struct AccountSection: View {
+    @StateObject private var auth = AuthService.shared
+    @StateObject private var trial = TrialState.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text("Account")
+                        .font(.title2).fontWeight(.semibold)
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Signed in as")
+                            .font(.caption).foregroundColor(.secondary)
+                        Text(auth.currentUserEmail ?? "Not signed in")
+                            .font(.system(size: 13, weight: .medium))
+                            .textSelection(.enabled)
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Plan")
+                            .font(.caption).foregroundColor(.secondary)
+                        entitlementRow
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Session")
+                            .font(.caption).foregroundColor(.secondary)
+                        HStack {
+                            Button("Sign out", action: confirmAndSignOut)
+                                .controlSize(.regular)
+                                .disabled(!auth.isSignedIn)
+                            Spacer()
+                        }
+                        Text("Trial state stays linked to your email — signing back in restores access.")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Delete account")
+                            .font(.caption).foregroundColor(.secondary)
+                        Text("Email support@sprichapp.com to delete your account and associated trial/license records.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Link("support@sprichapp.com",
+                             destination: URL(string: "mailto:support@sprichapp.com?subject=Delete%20my%20Sprich%20account")!)
+                            .font(.caption)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    @ViewBuilder
+    private var entitlementRow: some View {
+        switch trial.entitlement {
+        case .trialActive:
+            HStack(spacing: 10) {
+                Image(systemName: "clock.fill").foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Buy a lifetime license to keep dictating after your trial ends.")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("Upgrade") {
+                    NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        case .licensed:
+            Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.green)
+        case .trialExpired:
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill").foregroundStyle(.red)
+                Text("Trial expired").font(.system(size: 13, weight: .medium))
+                Spacer()
+                Button("Buy lifetime") {
+                    NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        case .deviceBlocked:
+            Text("This Mac is associated with another trial. Sign in with the original account, or buy a license to lift the block.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .signedOut, .unknown:
+            Text("Sign in from the menubar icon to start your trial.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @MainActor
+    private func confirmAndSignOut() {
+        guard auth.isSignedIn else { return }
+        let alert = NSAlert()
+        alert.messageText = "Sign out of Sprich?"
+        alert.informativeText = "Your trial state stays linked to your email — signing back in restores access."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Sign out")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            auth.signOut()
+        }
+    }
+
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.gray.opacity(0.2), lineWidth: 0.5)
+        )
     }
 }
