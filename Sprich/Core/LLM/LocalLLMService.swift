@@ -302,10 +302,29 @@ actor LocalLLMService {
 
     // MARK: - Preamble stripper
 
-    /// Known per-language preamble strings the 1B model occasionally
-    /// leaks before the actual output. Documented in
-    /// `local-llm-distribution-plan.md` § C7 (response parser).
-    private static let preambles: [String] = [
+    /// Gemma 3 1B occasionally generates a conversational opener before
+    /// (or instead of) the cleaned text, despite the prompt's "no preamble"
+    /// directive. Two failure modes observed:
+    ///
+    /// **Mode A — single-line preamble flush against content:**
+    ///   `"Here is the rewritten text: Sehr geehrter Herr Müller,…"`
+    ///   Handled by `preambleExactPrefixes`.
+    ///
+    /// **Mode B — meta-conversation paragraph followed by `\n\n` + content:**
+    ///   `"Please provide the text you would like me to rewrite.\n\nHello,…"`
+    ///   Reported by QA 2026-05-18. Handled by paragraph-split + meta-marker
+    ///   check below.
+    ///
+    /// We stay strict about what counts as meta:
+    /// - Bounded to dropping AT MOST the first paragraph
+    /// - First paragraph must be SHORT (< 120 chars — real dictation
+    ///   paragraphs are usually longer)
+    /// - Must contain at least one of the narrow `metaParagraphMarkers`
+    ///   that we never expect to see at the start of real dictation
+    /// - There must be a second paragraph (single-paragraph outputs are
+    ///   never stripped, even if they happen to mention "please")
+
+    private static let preambleExactPrefixes: [String] = [
         "Here is the rewritten text:",
         "Here's the rewritten text:",
         "Here is the cleaned text:",
@@ -315,14 +334,55 @@ actor LocalLLMService {
         "Hier der überarbeitete Text:"
     ]
 
+    /// Phrases that only appear when a small model is "talking to the user
+    /// about the task" rather than executing the task. Match is
+    /// case-insensitive and substring-based, applied only to the first
+    /// paragraph of a multi-paragraph output. Keep this list narrow —
+    /// false positives strip legitimate first-paragraph content.
+    private static let metaParagraphMarkers: [String] = [
+        "please provide",
+        "would like me to",
+        "what would you like",
+        "i'd be happy to",
+        "of course",
+        "sure!",
+        "sure,",
+        "okay,",
+        "okay!",
+        "got it",
+        "here is the rewritten",
+        "here's the rewritten",
+        "here is the cleaned",
+        "here's the cleaned",
+        "hier ist der",
+        "i can help you",
+        "let me know"
+    ]
+
     static func stripPreamble(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for preamble in preambles {
+
+        // Mode A — single-line exact-prefix strip.
+        for preamble in preambleExactPrefixes {
             if trimmed.hasPrefix(preamble) {
                 let dropped = trimmed.dropFirst(preamble.count)
                 return String(dropped).trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
+
+        // Mode B — meta-paragraph + blank line + real content.
+        let parts = trimmed.components(separatedBy: "\n\n")
+        if parts.count >= 2 {
+            let first = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let firstLower = first.lowercased()
+            if first.count < 120,
+               metaParagraphMarkers.contains(where: { firstLower.contains($0) }) {
+                return parts.dropFirst()
+                    .joined(separator: "\n\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
         return trimmed
     }
 }
