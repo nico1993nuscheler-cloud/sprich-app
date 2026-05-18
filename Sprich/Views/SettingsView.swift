@@ -103,7 +103,7 @@ struct SettingsView: View {
                 case .account:   AccountSection()
                 case .aiModels:  sectionPlaceholder(.aiModels)
                 case .modes:     sectionPlaceholder(.modes)
-                case .general:   sectionPlaceholder(.general)
+                case .general:   GeneralSection().environmentObject(appState)
                 case .privacy:   sectionPlaceholder(.privacy)
                 case .about:     sectionPlaceholder(.about)
                 }
@@ -1598,8 +1598,21 @@ private struct AccountSection: View {
     }
 
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        SettingsCard(content: content)
+    }
+}
+
+// MARK: - SettingsCard (shared card chrome for sidebar sections)
+
+/// Shared card chrome used by every sidebar section. Pulled out of
+/// SettingsView's private helper so AccountSection / GeneralSection /
+/// ModesSection / PrivacySection / AboutSection can share one component.
+struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            content()
+            content
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1611,5 +1624,138 @@ private struct AccountSection: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(Color.gray.opacity(0.2), lineWidth: 0.5)
         )
+    }
+}
+
+/// Sidebar-section header used by every section. One-liner replacement
+/// for the per-card `sectionHeader` of the old TabView IA.
+struct SettingsSectionHeader: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.title2).fontWeight(.semibold)
+        }
+    }
+}
+
+// MARK: - GeneralSection (P1-UX-04 + P1-UX-06)
+
+/// Input mode + max recording duration + keyboard shortcuts read-out +
+/// permissions. About content moved to AboutSection (P1-UX-12).
+/// Autosaves on field commit (P1-UX-06) — no Save button.
+private struct GeneralSection: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "gear", title: "General")
+
+                SettingsCard {
+                    Text("Input mode")
+                        .font(.caption).foregroundColor(.secondary)
+                    Picker("", selection: $appState.settings.inputMode) {
+                        ForEach(InputMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .onChange(of: appState.settings.inputMode) { _, _ in
+                        appState.saveSettings()
+                    }
+                }
+
+                SettingsCard {
+                    Text("Safety")
+                        .font(.caption).foregroundColor(.secondary)
+                    Stepper(
+                        "Max recording: \(appState.settings.maxRecordingDuration)s",
+                        value: $appState.settings.maxRecordingDuration,
+                        in: 30...600,
+                        step: 30
+                    )
+                    .onChange(of: appState.settings.maxRecordingDuration) { _, _ in
+                        appState.saveSettings()
+                    }
+                }
+
+                SettingsCard {
+                    Text("Keyboard shortcuts")
+                        .font(.caption).foregroundColor(.secondary)
+                    VStack(spacing: 8) {
+                        shortcutRow(name: "Literal mode", keys: "Fn + Shift")
+                        shortcutRow(name: "Formal mode", keys: "Fn + Control")
+                        if appState.settings.customModeEnabled {
+                            shortcutRow(
+                                name: appState.settings.customModeName.isEmpty ? "Custom mode" : appState.settings.customModeName,
+                                keys: "Fn + Command"
+                            )
+                        }
+                    }
+                }
+
+                SettingsCard {
+                    Text("Permissions")
+                        .font(.caption).foregroundColor(.secondary)
+                    permissionRow(
+                        name: "Accessibility",
+                        granted: Permissions.isAccessibilityGranted(),
+                        action: { Permissions.openAccessibilitySettings() }
+                    )
+                    permissionRow(
+                        name: "Microphone",
+                        granted: Permissions.isMicrophoneGranted(),
+                        pendingNote: "Requested on first use"
+                    )
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func shortcutRow(name: String, keys: String) -> some View {
+        HStack {
+            Text(name)
+            Spacer()
+            Text(keys)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.15)))
+        }
+    }
+
+    private func permissionRow(name: String, granted: Bool,
+                                action: (() -> Void)? = nil,
+                                pendingNote: String? = nil) -> some View {
+        HStack {
+            Text(name)
+            Spacer()
+            if granted {
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                Text("Granted").font(.caption).foregroundColor(.secondary)
+            } else {
+                // Orange instead of red (UX audit P2 — match Onboarding
+                // tone: orange = action needed, red = blocking error).
+                Image(systemName: "xmark.circle.fill").foregroundColor(.orange)
+                if let action = action {
+                    Button("Open Settings", action: action)
+                        .controlSize(.small)
+                } else if let note = pendingNote {
+                    Text(note).font(.caption).foregroundColor(.secondary)
+                }
+            }
+        }
     }
 }
