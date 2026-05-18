@@ -104,8 +104,8 @@ struct SettingsView: View {
                 case .aiModels:  sectionPlaceholder(.aiModels)
                 case .modes:     ModesSection().environmentObject(appState)
                 case .general:   GeneralSection().environmentObject(appState)
-                case .privacy:   sectionPlaceholder(.privacy)
-                case .about:     sectionPlaceholder(.about)
+                case .privacy:   PrivacySection()
+                case .about:     AboutSection()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1640,6 +1640,184 @@ struct SettingsSectionHeader: View {
                 .foregroundStyle(.secondary)
             Text(title)
                 .font(.title2).fontWeight(.semibold)
+        }
+    }
+}
+
+// MARK: - PrivacySection (P1-UX-11)
+
+/// Per Decision 4 in sprint-3-settings-ux.md: two cards only.
+/// The live NetworkStatusIndicator is the hero; the inventory link is
+/// the secondary path for skeptics. The "What Sprich never sends" 4-row
+/// checklist that Nico called wishiwashi is cut. The Gemma attribution
+/// string moved to AboutSection (still legally mandatory, just lives
+/// where attribution belongs).
+private struct PrivacySection: View {
+    @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "lock.shield", title: "Privacy")
+
+                SettingsCard {
+                    Text("Network status")
+                        .font(.caption).foregroundColor(.secondary)
+
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(networkIndicator.route.glyph)
+                            .font(.system(size: 28))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(networkIndicator.route.shortLabel)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(networkStatusStaticCopy)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(networkIndicator.route == .offline
+                                  ? Color.green.opacity(0.10)
+                                  : Color.orange.opacity(0.10))
+                    )
+
+                    Text("Sprich shows this indicator live on the recording overlay too — green confirms the dictation ran without any network call.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                SettingsCard {
+                    Text("Network call inventory")
+                        .font(.caption).foregroundColor(.secondary)
+                    Text("Every outbound call Sprich makes is documented in plain language. If you find a call we haven't disclosed, email support@sprichapp.com — we'd consider it a bug.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Button("Read the inventory") {
+                            if let url = URL(string: "https://sprichapp.com/network-calls") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .controlSize(.small)
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Present-tense framing for the static Settings card (the recording
+    /// overlay uses past-tense "stayed" to confirm what just happened).
+    private var networkStatusStaticCopy: String {
+        switch networkIndicator.route {
+        case .offline:
+            return "Sprich is configured to keep your audio and text on this Mac."
+        default:
+            return networkIndicator.route.tooltip
+        }
+    }
+}
+
+// MARK: - AboutSection (P1-UX-12)
+
+/// Version (dynamic, not hardcoded — UX audit P0 #5 fix) + Sprich
+/// tagline + trial/licensed state row + AI model attributions
+/// (Whisper + Gemma) including the legally mandatory Gemma Terms
+/// reference string (Sprint 2F locked decision: lives somewhere; moved
+/// here from Privacy per Decision 4).
+private struct AboutSection: View {
+    @StateObject private var trial = TrialState.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "info.circle", title: "About")
+
+                SettingsCard {
+                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
+                    HStack(spacing: 12) {
+                        Image("SprichLogo")
+                            .resizable()
+                            .frame(width: 40, height: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sprich").font(.system(size: 15, weight: .semibold))
+                            Text("Version \(appVersion)")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("Speech-to-text for macOS")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    // Trial / licensed state row (UX audit P0 #4 surface).
+                    switch trial.entitlement {
+                    case .trialActive:
+                        Divider().padding(.vertical, 4)
+                        HStack {
+                            Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
+                                .font(.caption)
+                            Spacer()
+                            Button("Upgrade to lifetime") {
+                                NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    case .licensed:
+                        Divider().padding(.vertical, 4)
+                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
+                        EmptyView()
+                    }
+                }
+
+                SettingsCard {
+                    Text("AI model attributions")
+                        .font(.caption).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Speech-to-text uses Whisper (OpenAI), running on-device via WhisperKit.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("On-device AI cleanup uses Gemma 3 by Google, running locally via llama.cpp.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // Sprint 2F mandatory Gemma attribution string (verbatim).
+                        // Relocated from the Privacy tab to About per Decision 4.
+                        Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                }
+
+                SettingsCard {
+                    Text("Support")
+                        .font(.caption).foregroundColor(.secondary)
+                    Link("support@sprichapp.com",
+                         destination: URL(string: "mailto:support@sprichapp.com")!)
+                        .font(.caption)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 }
