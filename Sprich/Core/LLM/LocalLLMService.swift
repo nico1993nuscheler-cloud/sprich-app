@@ -212,11 +212,15 @@ actor LocalLLMService {
 
         let raw = try await client.generateText(from: input)
 
-        // Strip the known preamble artifacts the 1B model occasionally
-        // emits despite the "no preamble" prompt directive. Whitelist is
-        // small + per `local-llm-distribution-plan.md` § C7.
-        return Self.stripPreamble(raw)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip the known artifacts the 1B model occasionally emits
+        // despite the "no preamble or commentary" prompt directive.
+        // Two-stage pipeline (order matters):
+        //   1. Strip meta-paragraph / single-line preambles
+        //   2. Strip whole-output wrapping quotes (the 1B model sometimes
+        //      treats its output as "the rewritten quote" and wraps it
+        //      in curly quotation marks — QA 2026-05-18).
+        let cleaned = Self.stripWrappingQuotes(Self.stripPreamble(raw))
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Resolve the on-disk file via `LLMModelManager` and call `prewarm`.
@@ -384,5 +388,59 @@ actor LocalLLMService {
         }
 
         return trimmed
+    }
+
+    /// Strip whole-output wrapping quotation marks.
+    ///
+    /// Gemma 3 1B sometimes treats its own output as "the rewritten quote"
+    /// and wraps the entire cleaned text in curly double-quotes
+    /// (`\u{201C}…\u{201D}`) — QA 2026-05-18 saw this consistently on the
+    /// English Formal-mode cleanup of a short business note.
+    ///
+    /// Conservative rule:
+    /// - Strip ONLY if both first and last characters are quote-like
+    /// - Strip ONLY one outer pair (no recursive nesting)
+    /// - Require at least 3 chars between so we don't reduce `""` to `""`
+    /// - Covers straight ASCII, English curly, single quotes, French
+    ///   guillemets, German continental
+    ///
+    /// Safe cases that are NOT stripped:
+    /// - `He said "yes."`           — first char isn't a quote
+    /// - `"This is great," she said.` — last char isn't a quote
+    /// - `Said "great" then left.`  — neither end is a quote
+    ///
+    /// Edge case (acceptable):
+    /// - User dictates a single fully-quoted phrase, e.g. `"Hello world"` —
+    ///   gets stripped to `Hello world`. Rare in dictation; if it ever
+    ///   matters, the user can dictate the quotes explicitly or use
+    ///   Literal mode.
+    static func stripWrappingQuotes(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3,
+              let first = trimmed.first,
+              let last = trimmed.last else {
+            return trimmed
+        }
+        let openers: Set<Character> = [
+            "\"",        // ASCII straight double
+            "\u{201C}",  // English left double curly
+            "'",         // ASCII straight single
+            "\u{2018}",  // English left single curly
+            "«",         // French left guillemet
+            "\u{201E}"   // German continental „
+        ]
+        let closers: Set<Character> = [
+            "\"",        // ASCII straight double
+            "\u{201D}",  // English right double curly
+            "'",         // ASCII straight single
+            "\u{2019}",  // English right single curly
+            "»",         // French right guillemet
+            "\u{201C}"   // German continental closing "
+        ]
+        guard openers.contains(first), closers.contains(last) else {
+            return trimmed
+        }
+        return String(trimmed.dropFirst().dropLast())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
