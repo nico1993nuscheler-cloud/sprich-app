@@ -102,7 +102,7 @@ struct SettingsView: View {
                 switch selection {
                 case .account:   AccountSection()
                 case .aiModels:  sectionPlaceholder(.aiModels)
-                case .modes:     sectionPlaceholder(.modes)
+                case .modes:     ModesSection().environmentObject(appState)
                 case .general:   GeneralSection().environmentObject(appState)
                 case .privacy:   sectionPlaceholder(.privacy)
                 case .about:     sectionPlaceholder(.about)
@@ -1641,6 +1641,172 @@ struct SettingsSectionHeader: View {
             Text(title)
                 .font(.title2).fontWeight(.semibold)
         }
+    }
+}
+
+// MARK: - ModesSection (P1-UX-05 + P1-UX-06)
+
+/// Three mode editors (Literal / Formal / Custom). The mode-per-hotkey
+/// surface is Sprich's #1 differentiator per the OW audit — this section
+/// stays a first-class destination. Each mode has its system-prompt
+/// editor + hotkey display + Reset-to-default. Formal also has the
+/// adapt-tone-to-destination-app toggle. Autosaves on field commit.
+private struct ModesSection: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "text.quote", title: "Modes")
+
+                Text("Three dictation modes, each on its own hotkey. Pick the right one as you press — no menus, no settings round-trip.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SettingsCard {
+                    HStack {
+                        Text("Literal").font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        shortcutChip("Fn + Shift")
+                    }
+                    Text("Fast clean-up via Whisper only (no AI rewrite). Punctuation and capitalization polished locally.")
+                        .font(.caption).foregroundColor(.secondary)
+                    promptEditor($appState.settings.literalPrompt)
+                    HStack {
+                        Button("Reset to default") {
+                            appState.settings.literalPrompt = TranscriptionMode.literal.defaultSystemPrompt
+                            appState.saveSettings()
+                        }
+                        .font(.caption)
+                        Spacer()
+                    }
+                    .onChange(of: appState.settings.literalPrompt) { _, _ in
+                        appState.saveSettings()
+                    }
+                }
+
+                SettingsCard {
+                    HStack {
+                        Text("Formal").font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        shortcutChip("Fn + Control")
+                    }
+                    Text("Full AI rewrite for professional written text.")
+                        .font(.caption).foregroundColor(.secondary)
+                    promptEditor($appState.settings.formalPrompt)
+                    HStack {
+                        Button("Reset to default") {
+                            appState.settings.formalPrompt = TranscriptionMode.formal.defaultSystemPrompt
+                            appState.saveSettings()
+                        }
+                        .font(.caption)
+                        Spacer()
+                    }
+
+                    Divider().padding(.vertical, 4)
+
+                    Toggle("Adapt tone to destination app", isOn: $appState.settings.adaptToSurface)
+                        .toggleStyle(.switch)
+                        .onChange(of: appState.settings.adaptToSurface) { _, _ in
+                            appState.saveSettings()
+                        }
+                    Text("Matches the rewrite to where you're pasting — email greeting for Gmail/Mail, terse for Slack/Teams/Messages, clean prose for docs. Reads the active browser tab URL for web apps (one-time Automation permission).")
+                        .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: appState.settings.formalPrompt) { _, _ in
+                        appState.saveSettings()
+                    }
+                }
+
+                SettingsCard {
+                    HStack {
+                        Text("Custom").font(.system(size: 13, weight: .semibold))
+                        Spacer()
+                        shortcutChip("Fn + Command")
+                    }
+
+                    Toggle("Enable custom mode", isOn: $appState.settings.customModeEnabled)
+                        .toggleStyle(.switch)
+                        .onChange(of: appState.settings.customModeEnabled) { _, _ in
+                            appState.saveSettings()
+                        }
+
+                    if appState.settings.customModeEnabled {
+                        Divider().padding(.vertical, 4)
+
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Name").font(.caption).foregroundColor(.secondary)
+                                TextField("", text: $appState.settings.customModeName,
+                                          prompt: Text("Slack"))
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit { appState.saveSettings() }
+                            }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Badge").font(.caption).foregroundColor(.secondary)
+                                TextField("", text: Binding(
+                                    get: { appState.settings.customModeBadge },
+                                    set: {
+                                        appState.settings.customModeBadge = String($0.prefix(1)).uppercased()
+                                        appState.saveSettings()
+                                    }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 60)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("System prompt")
+                                    .font(.caption).foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(appState.settings.customModePrompt.count) / 400")
+                                    .font(.caption2)
+                                    .foregroundColor(appState.settings.customModePrompt.count >= 400 ? .orange : .secondary)
+                            }
+                            promptEditor(Binding(
+                                get: { appState.settings.customModePrompt },
+                                set: {
+                                    appState.settings.customModePrompt = String($0.prefix(400))
+                                    appState.saveSettings()
+                                }
+                            ))
+                        }
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    private func promptEditor(_ text: Binding<String>) -> some View {
+        TextEditor(text: text)
+            .font(.system(size: 12, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(height: 90)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.gray.opacity(0.25), lineWidth: 0.5)
+            )
+    }
+
+    private func shortcutChip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.15)))
     }
 }
 
