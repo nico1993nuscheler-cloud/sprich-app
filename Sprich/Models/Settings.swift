@@ -8,7 +8,20 @@ enum STTProviderType: String, Codable, CaseIterable {
     case deepgram = "Deepgram Nova-3"
     case local = "Local (offline)"
 
-    var displayName: String { rawValue }
+    /// User-facing label. `displayName` is what every Settings / menu / error
+    /// surface should read; the `rawValue` is locked to its current string
+    /// because it's the persisted `Codable` representation — renaming it
+    /// would orphan every existing user's settings.json.
+    ///
+    /// `.local` reads "On this Mac" per Decision 5 (sprint-3-settings-ux.md)
+    /// — "Local (offline)" was technically correct but parsed as a feature
+    /// flag instead of a place where the work happens.
+    var displayName: String {
+        switch self {
+        case .local: return "On this Mac"
+        default:     return rawValue
+        }
+    }
 
     /// True when this provider runs entirely on-device and needs no API key.
     var isLocal: Bool { self == .local }
@@ -50,7 +63,15 @@ enum LLMProviderType: String, Codable, CaseIterable {
     case openai = "OpenAI"
     case local = "Local (offline)"
 
-    var displayName: String { rawValue }
+    /// User-facing label. See `STTProviderType.displayName` — same rules:
+    /// rawValue is the persisted Codable string and must not change;
+    /// `.local` reads "On this Mac" per Decision 5.
+    var displayName: String {
+        switch self {
+        case .local: return "On this Mac"
+        default:     return rawValue
+        }
+    }
 
     /// True when this provider runs entirely on-device and needs no API key.
     /// Mirrors `STTProviderType.local`'s shape — readiness of the model bytes

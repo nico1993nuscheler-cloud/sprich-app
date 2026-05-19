@@ -206,7 +206,7 @@ class PipelineCoordinator {
             // missing key means: cloud configured, online, key missing.
             surfaceBlockingError(
                 title: "STT API key missing for \(provider.displayName)",
-                body: "Open Sprich Settings → API Keys and paste the \(provider.displayName) key, or switch to Local (offline) in Providers."
+                body: "Open Sprich Settings → AI Models and paste the \(provider.displayName) key, or switch to On this Mac."
             )
             return
         }

@@ -502,7 +502,7 @@ struct OnboardingView: View {
         case .preparing:
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
-                Text("Compiling Core ML graph (one-time, ~10–30 s)…")
+                Text("Optimizing for your Mac (one-time, ~10–30 s)…")
                     .font(.caption).foregroundColor(.secondary)
                 Spacer()
             }
