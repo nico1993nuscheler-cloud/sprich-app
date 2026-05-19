@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 extension Notification.Name {
     static let sprichOnboardingComplete = Notification.Name("sprich.onboardingComplete")
@@ -56,6 +57,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)
+
+        // Route UN notification taps for the missing-API-key banner
+        // (P1-UX-14) back to the deep-link handler. Set before any
+        // notification posts so the very first one routes correctly.
+        UNUserNotificationCenter.current().delegate = MissingKeyBannerDelegate.shared
 
         // Set up menu bar
         setupMenuBar()
@@ -576,24 +582,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // How to use Sprich — shortcut cheat-sheet (includes Literal /
-        // Formal mode reference, so those rows no longer live here).
-        let helpItem = NSMenuItem(title: "How to use Sprich", action: #selector(openShortcutHelp), keyEquivalent: "")
-        helpItem.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "How to use Sprich")
+        // Shortcut cheat sheet — concrete name; the old "How to use
+        // Sprich" framing read like a manual-table-of-contents.
+        // (P1-UX-16, UX audit P0/P1 cleanup.)
+        let helpItem = NSMenuItem(title: "Shortcut cheat sheet", action: #selector(openShortcutHelp), keyEquivalent: "")
+        helpItem.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: "Shortcut cheat sheet")
         helpItem.target = self
         menu.addItem(helpItem)
 
         // Diagnostics submenu — recovery actions that are useful when
-        // something's off but shouldn't clutter the main menu.
+        // something's off but shouldn't clutter the main menu. P1-UX-16
+        // renamed both items away from dev-tool wording flagged by the
+        // UX audit (P0 #2 / P1 #5).
         let diagItem = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
         diagItem.image = NSImage(systemSymbolName: "wrench.and.screwdriver", accessibilityDescription: "Diagnostics")
         let diagMenu = NSMenu()
 
-        let restartItem = NSMenuItem(title: "Restart hotkey listener", action: #selector(restartHotkeys), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: "Reconnect shortcut", action: #selector(restartHotkeys), keyEquivalent: "")
         restartItem.target = self
         diagMenu.addItem(restartItem)
 
-        let replayItem = NSMenuItem(title: "Replay onboarding…", action: #selector(replayOnboarding), keyEquivalent: "")
+        let replayItem = NSMenuItem(title: "Show welcome again", action: #selector(replayOnboarding), keyEquivalent: "")
         replayItem.target = self
         diagMenu.addItem(replayItem)
 

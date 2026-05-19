@@ -49,7 +49,7 @@ struct ModelDownloadView: View {
             case .preparing:
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Preparing model (one-time Core ML compile)…")
+                    Text("Optimizing for your Mac (one-time, ~10–30 s)…")
                         .font(.caption)
                 }
             case .ready:
@@ -106,7 +106,7 @@ struct ModelDownloadView: View {
         case .downloading:
             return "Downloading from Hugging Face…"
         case .preparing:
-            return "Compiling Core ML graph…"
+            return "Optimizing for your Mac (one-time, ~10–30 s)…"
         case .failed:
             return "Download failed"
         default:
