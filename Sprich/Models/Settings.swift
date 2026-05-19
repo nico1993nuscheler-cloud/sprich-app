@@ -8,7 +8,20 @@ enum STTProviderType: String, Codable, CaseIterable {
     case deepgram = "Deepgram Nova-3"
     case local = "Local (offline)"
 
-    var displayName: String { rawValue }
+    /// User-facing label. `displayName` is what every Settings / menu / error
+    /// surface should read; the `rawValue` is locked to its current string
+    /// because it's the persisted `Codable` representation — renaming it
+    /// would orphan every existing user's settings.json.
+    ///
+    /// `.local` reads "On this Mac" per Decision 5 (sprint-3-settings-ux.md)
+    /// — "Local (offline)" was technically correct but parsed as a feature
+    /// flag instead of a place where the work happens.
+    var displayName: String {
+        switch self {
+        case .local: return "On this Mac"
+        default:     return rawValue
+        }
+    }
 
     /// True when this provider runs entirely on-device and needs no API key.
     var isLocal: Bool { self == .local }
@@ -50,7 +63,15 @@ enum LLMProviderType: String, Codable, CaseIterable {
     case openai = "OpenAI"
     case local = "Local (offline)"
 
-    var displayName: String { rawValue }
+    /// User-facing label. See `STTProviderType.displayName` — same rules:
+    /// rawValue is the persisted Codable string and must not change;
+    /// `.local` reads "On this Mac" per Decision 5.
+    var displayName: String {
+        switch self {
+        case .local: return "On this Mac"
+        default:     return rawValue
+        }
+    }
 
     /// True when this provider runs entirely on-device and needs no API key.
     /// Mirrors `STTProviderType.local`'s shape — readiness of the model bytes
@@ -210,8 +231,21 @@ struct AppSettings: Codable {
         self.googleModel          = (try? c.decode(String.self,          forKey: .googleModel))          ?? d.googleModel
         self.openAILLMModel       = (try? c.decode(String.self,          forKey: .openAILLMModel))       ?? d.openAILLMModel
         self.preferredLanguage    = try? c.decodeIfPresent(String.self,  forKey: .preferredLanguage)
-        self.literalPrompt        = (try? c.decode(String.self,          forKey: .literalPrompt))        ?? d.literalPrompt
-        self.formalPrompt         = (try? c.decode(String.self,          forKey: .formalPrompt))         ?? d.formalPrompt
+        // Sprint 3 polish #6 — soft-migrate stale Literal/Formal prompts.
+        // The pre-Sprint-2F defaults hardcoded "Maintain input language
+        // (DE/EN)" and got persisted into every existing user's settings.json.
+        // Sprint 2F replaced the defaults (see proposed-prompt-change.md);
+        // settings on disk did not auto-upgrade. If the saved value matches
+        // a known prior default verbatim, swap it to the current default —
+        // a user with a custom prompt is never touched.
+        let savedLiteral = (try? c.decode(String.self, forKey: .literalPrompt)) ?? d.literalPrompt
+        let savedFormal  = (try? c.decode(String.self, forKey: .formalPrompt))  ?? d.formalPrompt
+        self.literalPrompt = AppSettings.knownLegacyLiteralDefaults.contains(savedLiteral)
+            ? d.literalPrompt
+            : savedLiteral
+        self.formalPrompt = AppSettings.knownLegacyFormalDefaults.contains(savedFormal)
+            ? d.formalPrompt
+            : savedFormal
         self.customModeEnabled    = (try? c.decode(Bool.self,            forKey: .customModeEnabled))    ?? d.customModeEnabled
         self.customModeName       = (try? c.decode(String.self,          forKey: .customModeName))       ?? d.customModeName
         self.customModeBadge      = (try? c.decode(String.self,          forKey: .customModeBadge))      ?? d.customModeBadge
@@ -270,6 +304,20 @@ struct AppSettings: Codable {
         self.localWhisperModel = localWhisperModel
         self.localLLMModel = localLLMModel
     }
+
+    /// Pre-Sprint-2F Literal defaults that should be auto-upgraded to the
+    /// current `TranscriptionMode.literal.defaultSystemPrompt`. A user who
+    /// authored their own Literal prompt is never matched against this list.
+    /// Migration runs in `init(from:)` — see polish #6 in sprint-3 follow-ups.
+    static let knownLegacyLiteralDefaults: Set<String> = [
+        // Original pre-2F default — hardcoded "Maintain input language (DE/EN)"
+        // that biased Whisper toward only those two languages.
+        "Clean up dictated text. Remove fillers, false starts, fix grammar. Keep original wording and tone. Maintain input language (DE/EN). Output only cleaned text."
+    ]
+
+    static let knownLegacyFormalDefaults: Set<String> = [
+        "Rewrite dictated text as professional written text for emails/business. Remove spoken artifacts, improve structure and formality. Maintain input language (DE/EN). Output only final text."
+    ]
 
     static var defaults: AppSettings {
         AppSettings(

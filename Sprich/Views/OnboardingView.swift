@@ -21,14 +21,29 @@ struct OnboardingView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var trial = TrialState.shared
     @ObservedObject private var whisperManager = WhisperModelManager.shared
+    /// Local LLM manager — used by the On-Mac AI cleanup subsections
+    /// (P1-UX-18) so card 3 can show eligibility + start a download
+    /// without leaving the onboarding window.
+    @ObservedObject private var llmManager = LLMModelManager.shared
+    /// HardwareProbe result for the LLM eligibility badge (P1-UX-18).
+    /// Probed once on appear; re-checking is a less common need during
+    /// onboarding than in Settings, so we don't surface a Re-check button
+    /// here.
+    @State private var hardwareTier: HardwareProbe.Tier = HardwareProbe.evaluate()
 
     @State private var currentStep = 0
 
     @State private var groqKey = ""
     @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
     @State private var microphoneGranted = Permissions.isMicrophoneGranted()
+    /// STT provider chosen on card 3. `.local` defaults so the
+    /// privacy-first card lights up before the user does anything.
     @State private var providerChoice: STTProviderType = .local
-    @State private var cloudDisclosureExpanded = false
+    /// LLM provider chosen on card 3 (P1-UX-17). Default `.groq` — the
+    /// recommended one-key cloud setup that matches what a first-time
+    /// user is most likely to pick. P1-UX-19 commits this to
+    /// `appState.settings.llmProvider` when the user advances past card 3.
+    @State private var llmProviderChoice: LLMProviderType = .groq
 
     /// Try-it-now state: text captured via PipelineCoordinator.interceptOutput,
     /// plus a one-shot `confettiActive` trigger.
@@ -63,7 +78,7 @@ struct OnboardingView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             providerChoice = appState.settings.sttProvider
-            cloudDisclosureExpanded = !providerChoice.isLocal
+            llmProviderChoice = appState.settings.llmProvider
         }
         .onDisappear {
             // Catches the red-⊗ dismissal while on step 3 — neither the
@@ -344,75 +359,51 @@ struct OnboardingView: View {
         )
     }
 
-    // MARK: - Step 2 — Provider + Preparing
+    // MARK: - Step 2 — Provider (Speech recognition + AI cleanup)
 
+    /// Sprint 3 P1-UX-17 + P1-UX-18: two stacked `ProviderCardPair` cards
+    /// (Speech recognition + AI cleanup), each surfacing the same Cloud /
+    /// On-this-Mac selector that Settings → AI Models uses. One design
+    /// pattern from first launch through Settings (Decision 2 in
+    /// sprint-3-settings-ux.md).
     private var providerPreparingStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Choose your transcription").font(.title2).fontWeight(.semibold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Pick where the AI runs")
+                    .font(.title2).fontWeight(.semibold)
 
-            Text("Sprich can transcribe fully on your Mac (default) or use a cloud API (recommended for the fastest, most polished output).")
-                .foregroundColor(.secondary)
+                Text("You can change either of these later in Settings → AI Models.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            providerOptionCard(
-                choice: .local,
-                icon: "lock.shield.fill",
-                title: "Local (default)",
-                badge: "No account · No API key · ~\(WhisperModelCatalog.balanced.approxSizeMB) MB one-time download",
-                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Best privacy, zero per-dictation cost."
-            )
+                speechRecognitionPair
 
-            DisclosureGroup(isExpanded: $cloudDisclosureExpanded) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("A cloud key unlocks faster STT and the AI cleanup used in Formal/Custom modes. Groq's free tier is generous.")
-                        .font(.caption).foregroundColor(.secondary)
-
-                    providerOptionCard(
-                        choice: .groq,
-                        icon: "bolt.fill",
-                        title: "Cloud — Groq (recommended)",
-                        badge: "Free tier · powers STT + Formal cleanup",
-                        description: "One key drives both transcription and Formal-mode polish."
-                    )
-
-                    if providerChoice == .groq {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Groq API key").font(.caption).foregroundColor(.secondary)
-                            SecureField("gsk_…", text: $groqKey)
-                                .textFieldStyle(.roundedBorder)
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundColor(.accentColor)
-                                Link("Get a free Groq key at console.groq.com",
-                                     destination: URL(string: "https://console.groq.com/keys")!)
-                                    .font(.caption)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
+                if providerChoice == .local {
+                    preparingStrip
                 }
-                .padding(.top, 8)
-            } label: {
-                Text("Cloud — recommended for fastest speed and Formal-mode cleanup")
-                    .font(.system(size: 13, weight: .medium))
-            }
 
-            // Inline preparing-progress strip — shows when Local is the
-            // active provider AND the model isn't already Ready. We
-            // start the download as soon as the user lands on this step
-            // so the bar climbs while they pick options.
-            if providerChoice == .local {
-                preparingStrip
-            }
+                aiCleanupPair
 
-            Spacer()
+                if llmProviderChoice.isLocal {
+                    localLLMNoteInOnboarding
+                }
 
-            navRow(
-                primaryLabel: providerPrimaryLabel,
-                primaryDisabled: providerPrimaryDisabled
-            ) {
-                commitProviderChoice()
-                currentStep = 3
+                if providerChoice == .groq || llmProviderChoice == .groq {
+                    groqKeyField
+                }
+
+                Spacer(minLength: 0)
+
+                navRow(
+                    primaryLabel: providerPrimaryLabel,
+                    primaryDisabled: providerPrimaryDisabled
+                ) {
+                    commitProviderChoice()
+                    currentStep = 3
+                }
             }
+            .padding(.vertical, 2)
         }
         .onChange(of: providerChoice) { choice in
             if choice == .local {
@@ -428,6 +419,224 @@ struct OnboardingView: View {
                 Task { @MainActor in
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
+            }
+            // Refresh local LLM state so the inline P1-UX-18 subsections
+            // reflect on-disk truth (e.g. user downloaded earlier and the
+            // status badge should already say "Ready").
+            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+        }
+    }
+
+    @ViewBuilder
+    private var speechRecognitionPair: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Speech recognition")
+                .font(.system(size: 13, weight: .semibold))
+            ProviderCardPair(
+                isLocalSelected: providerChoice.isLocal,
+                cloudTitle: "Cloud",
+                cloudIcon: "cloud",
+                cloudSubtitle: "API Key required / Fastest response time",
+                cloudDescription: "Audio sent to chosen provider for transcription.",
+                localTitle: "On this Mac",
+                localIcon: "laptopcomputer",
+                localSubtitle: "Private / No API Key",
+                localDescription: "Runs fully on-device. Slightly slower.",
+                onSelectCloud: { providerChoice = .groq },
+                onSelectLocal: { providerChoice = .local }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var aiCleanupPair: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("AI cleanup (Formal + Custom modes)")
+                .font(.system(size: 13, weight: .semibold))
+            ProviderCardPair(
+                isLocalSelected: llmProviderChoice.isLocal,
+                cloudTitle: "Cloud",
+                cloudIcon: "cloud",
+                cloudSubtitle: "API Key required / Fastest response time",
+                cloudDescription: "Transcribed text is sent to chosen provider for cleanup. No storage required.",
+                localTitle: "On this Mac",
+                localIcon: "laptopcomputer",
+                localSubtitle: "Private / No API Key",
+                localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
+                onSelectCloud: { llmProviderChoice = .groq },
+                onSelectLocal: { llmProviderChoice = .local }
+            )
+        }
+    }
+
+    /// On-Mac AI cleanup subsections (P1-UX-18). Replaces the standalone
+    /// LocalLLMOnboardingView sheet: eligibility badge, storage breakdown,
+    /// and a download-or-defer affordance — all inline inside card 3.
+    @ViewBuilder
+    private var localLLMNoteInOnboarding: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            hardwareEligibilityRow
+
+            if hardwareTier.supportsLocalLLM {
+                storageBreakdown
+                downloadOrDeferRow
+            } else {
+                steerToCloudCopy
+            }
+        }
+    }
+
+    /// 🟢 / 🟡 / 🔴 hardware tier badge — same probe Settings uses.
+    @ViewBuilder
+    private var hardwareEligibilityRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(hardwareTierGlyph)
+                .font(.system(size: 18))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your Mac: \(hardwareTier.displayLabel)")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(hardwareTier.latencyExpectationCopy)
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
+    }
+
+    private var hardwareTierGlyph: String {
+        switch hardwareTier {
+        case .recommended:  return "🟢"
+        case .eligible:     return "🟡"
+        case .notSupported: return "🔴"
+        }
+    }
+
+    /// Total install footprint disclosure — non-negotiable per the local-
+    /// LLM scoping session ("Disclose total install footprint before any
+    /// download starts").
+    @ViewBuilder
+    private var storageBreakdown: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            storageRow(label: "Whisper (speech-to-text)", size: "~1.5 GB")
+            storageRow(label: "Gemma 3 1B (AI cleanup)", size: "~0.8 GB")
+            Divider().padding(.vertical, 2)
+            storageRow(label: "Total", size: "~2.3 GB", bold: true)
+            Text("Both models live in ~/Library/Application Support/Sprich/ and never leave your Mac.")
+                .font(.caption2).foregroundColor(.secondary)
+                .padding(.top, 2)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.04)))
+    }
+
+    private func storageRow(label: String, size: String, bold: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(bold ? .system(size: 12, weight: .semibold) : .system(size: 12))
+            Spacer()
+            Text(size)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(bold ? .primary : .secondary)
+        }
+    }
+
+    /// "Download now" button + live status, or a defer-to-later note —
+    /// covers the Sprint 2F Decision 8 Option C "Wait" / "Later" branches.
+    /// `commitProviderChoice` (P1-UX-19) writes `.local` regardless of
+    /// which timing the user picks; first Formal/Custom dictation re-
+    /// prompts if the model isn't downloaded yet.
+    @ViewBuilder
+    private var downloadOrDeferRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                downloadActionButton
+                Spacer()
+                downloadStatusLabel
+            }
+            Text("You can also download later from Settings → AI Models. Default (Literal) mode works without it.")
+                .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var downloadActionButton: some View {
+        switch llmManager.state {
+        case .ready:
+            Label("AI model ready", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .downloading, .verifying, .preparing:
+            Button("Cancel download") { llmManager.cancelDownload() }
+                .controlSize(.small)
+        default:
+            Button("Download AI model now (~0.8 GB)") {
+                Task { @MainActor in
+                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.defaultSpec)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private var downloadStatusLabel: some View {
+        switch llmManager.state {
+        case .downloading(let p):
+            Text("\(Int(p * 100))%")
+                .font(.caption).foregroundColor(.secondary).monospacedDigit()
+        case .verifying:
+            Text("Verifying…").font(.caption).foregroundColor(.secondary)
+        case .preparing:
+            Text("Preparing…").font(.caption).foregroundColor(.secondary)
+        case .failed(let err):
+            Text(err.errorDescription ?? "Setup failed")
+                .font(.caption).foregroundColor(.orange)
+                .lineLimit(1)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// Hardware tier `.notSupported` — steer to cloud LLM rather than
+    /// dead-ending the user with a "your Mac can't do this" message.
+    @ViewBuilder
+    private var steerToCloudCopy: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill").foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This Mac isn't a match for on-device AI cleanup.")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Speech-to-text still runs on your Mac — only AI cleanup uses a cloud provider with your own API key. Pick Cloud above to continue.")
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.08)))
+    }
+
+    /// Shared Groq key field — rendered when either provider is set to
+    /// cloud-Groq (the recommended path). Groq's key powers both STT
+    /// and AI cleanup, so collecting it once here covers both choices.
+    @ViewBuilder
+    private var groqKeyField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Groq API key").font(.caption).foregroundColor(.secondary)
+            SecureField("gsk_…", text: $groqKey)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.right.square")
+                    .foregroundColor(.accentColor)
+                Link("Get a free Groq key at console.groq.com",
+                     destination: URL(string: "https://console.groq.com/keys")!)
+                    .font(.caption)
             }
         }
     }
@@ -502,7 +711,7 @@ struct OnboardingView: View {
         case .preparing:
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
-                Text("Compiling Core ML graph (one-time, ~10–30 s)…")
+                Text("Optimizing for your Mac (one-time, ~10–30 s)…")
                     .font(.caption).foregroundColor(.secondary)
                 Spacer()
             }
@@ -522,9 +731,32 @@ struct OnboardingView: View {
         }
     }
 
+    /// Persist the user's card-3 picks when they advance to card 4.
+    /// Sprint 3 P1-UX-19 — both providers commit here. The On-Mac LLM
+    /// branch is honored regardless of whether the user clicked
+    /// "Download now" inside the local-LLM subsection: the provider
+    /// flips to `.local` and the first Formal/Custom dictation re-prompts
+    /// to download (Sprint 2F Decision 8 Option C, wired in
+    /// PipelineCoordinator's local-LLM-not-ready path).
+    ///
+    /// Note: `AppSettings.defaults.llmProvider` stays `.groq` — the
+    /// factory default is the safety net for users who skip onboarding
+    /// entirely (closing the window before reaching card 3) and for
+    /// fresh-install hardware-not-supported users. Flipping the static
+    /// default to `.local` would break both paths.
     private func commitProviderChoice() {
+        // STT provider + Whisper warmup.
         appState.settings.sttProvider = providerChoice
+
+        // LLM provider — flip to `.local` when the user picked On-Mac
+        // for AI cleanup, regardless of whether they triggered the
+        // download inside card 3 ("Wait" and "Later" both end up here
+        // with .local persisted and the model bytes still absent;
+        // dictation-time re-prompt picks it up).
+        appState.settings.llmProvider = llmProviderChoice
+
         appState.saveSettings()
+
         switch providerChoice {
         case .local:
             let model = appState.settings.localWhisperModel
@@ -542,55 +774,6 @@ struct OnboardingView: View {
         default:
             break
         }
-    }
-
-    private func providerOptionCard(
-        choice: STTProviderType,
-        icon: String,
-        title: String,
-        badge: String,
-        description: String
-    ) -> some View {
-        let selected = providerChoice == choice
-        return Button {
-            providerChoice = choice
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 22))
-                    .foregroundColor(selected ? .accentColor : .secondary)
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(title).font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.accentColor)
-                        }
-                    }
-                    Text(badge).font(.caption2).foregroundColor(.secondary)
-                    Text(description).font(.caption).foregroundColor(.secondary)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(selected
-                          ? Color.accentColor.opacity(0.08)
-                          : Color(NSColor.controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        selected ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.2),
-                        lineWidth: selected ? 1 : 0.5
-                    )
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Step 3 — Try it now

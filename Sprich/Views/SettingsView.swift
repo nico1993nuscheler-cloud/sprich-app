@@ -1,7 +1,57 @@
 import SwiftUI
 
+/// Sprint 3 IA: sidebar (NavigationSplitView), 6 sections.
+///
+/// `SettingsSection` is the deep-link target for `MissingKeyBanner`'s
+/// "Open Settings → AI cleanup" CTA (P1-UX-14). The banner posts a
+/// `.sprichOpenSettingsSection` notification carrying the section to
+/// route to; `SettingsView` listens and updates `selection`.
+enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
+    case account
+    case aiModels
+    case modes
+    case general
+    case privacy
+    case about
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .account:   return "Account"
+        case .aiModels:  return "AI Models"
+        case .modes:     return "Modes"
+        case .general:   return "General"
+        case .privacy:   return "Privacy"
+        case .about:     return "About"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .account:   return "person.crop.circle"
+        case .aiModels:  return "brain"
+        case .modes:     return "text.quote"
+        case .general:   return "gear"
+        case .privacy:   return "lock.shield"
+        case .about:     return "info.circle"
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Posted by `MissingKeyBanner` (and any other deep-link source) to
+    /// route the Settings window to a specific section. UserInfo carries
+    /// the `SettingsSection` raw value under key `"section"`.
+    static let sprichOpenSettingsSection = Notification.Name("SprichOpenSettingsSection")
+}
+
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+
+    // Sidebar selection (P1-UX-01). Defaults to AI Models — the
+    // load-bearing page where most users start.
+    @State private var selection: SettingsSection = .aiModels
 
     // Local state for API key fields (read from Keychain on appear)
     @State private var groqKey = ""
@@ -10,60 +60,68 @@ struct SettingsView: View {
     @State private var anthropicKey = ""
     @State private var googleKey = ""
 
-    @State private var showSavedAlert = false
-    @State private var showAdvancedKeys = false
-    @State private var showAdvancedLLM = false
-
-    // Glossary local editing
-    @State private var newGlossaryFrom = ""
-    @State private var newGlossaryTo = ""
-
     // Local Whisper model download sheet
     @State private var showModelDownload = false
     @ObservedObject private var whisperManager = WhisperModelManager.shared
 
     // Local LLM (Sprint 2F)
     @State private var showLLMDownload = false
-    @State private var showLLMOnboarding = false
     @ObservedObject private var llmManager = LLMModelManager.shared
     /// Cached HardwareProbe result. Probed `.onAppear`, re-probed when the
     /// user taps "Re-check" (so a post-RAM-upgrade user can flip from 🟡 to 🟢).
     @State private var hardwareTier: HardwareProbe.Tier = .recommended
 
-    // Trial state drives the Upgrade button in the About card (L3.2).
-    // Live-refreshes the card so the button appears/disappears the moment
-    // entitlement flips (trial → expired, trial → licensed after purchase).
-    @StateObject private var trial = TrialState.shared
-
     var body: some View {
-        TabView {
-            apiKeysTab
-                .tabItem { Label("API Keys", systemImage: "key") }
-
-            providersTab
-                .tabItem { Label("Providers", systemImage: "server.rack") }
-
-            modesTab
-                .tabItem { Label("Modes", systemImage: "text.quote") }
-
-            dictionaryTab
-                .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
-
-            privacyTab
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-
-            generalTab
-                .tabItem { Label("General", systemImage: "gear") }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selection) { section in
+                NavigationLink(value: section) {
+                    Label(section.displayName, systemImage: section.iconName)
+                        // Sprint 3 polish #4 — extra row breathing room so
+                        // labels don't read flush against the sidebar edge.
+                        .padding(.vertical, 2)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 240)
+            .listStyle(.sidebar)
+        } detail: {
+            // Each section is wired ticket-by-ticket. The shell (this ticket,
+            // P1-UX-01) lands a placeholder for every section so navigation
+            // works end-to-end; P1-UX-03 through P1-UX-12 replace them.
+            Group {
+                switch selection {
+                case .account:   AccountSection()
+                case .aiModels:
+                    AIModelsSection(
+                        groqKey: $groqKey,
+                        openAIKey: $openAIKey,
+                        deepgramKey: $deepgramKey,
+                        anthropicKey: $anthropicKey,
+                        googleKey: $googleKey,
+                        hardwareTier: $hardwareTier,
+                        onRequestWhisperDownload: { showModelDownload = true },
+                        onRequestLLMDownload: { showLLMDownload = true }
+                    )
+                    .environmentObject(appState)
+                case .modes:     ModesSection().environmentObject(appState)
+                case .general:   GeneralSection().environmentObject(appState)
+                case .privacy:   PrivacySection()
+                case .about:     AboutSection()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 620, height: 620)
+        .frame(width: 820, height: 640)
+        .onReceive(NotificationCenter.default.publisher(for: .sprichOpenSettingsSection)) { note in
+            if let raw = note.userInfo?["section"] as? String,
+               let section = SettingsSection(rawValue: raw) {
+                selection = section
+            }
+        }
         .onAppear {
             loadKeys()
             whisperManager.refreshState(for: appState.settings.localWhisperModel)
             llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
             hardwareTier = HardwareProbe.evaluate()
-        }
-        .alert("Settings Saved", isPresented: $showSavedAlert) {
-            Button("OK", role: .cancel) {}
         }
         .sheet(isPresented: $showModelDownload) {
             ModelDownloadView(
@@ -108,461 +166,173 @@ struct SettingsView: View {
                 }
             )
         }
-        .sheet(isPresented: $showLLMOnboarding) {
-            LocalLLMOnboardingView(onClose: {
-                showLLMOnboarding = false
-            })
+    }
+
+    private func loadKeys() {
+        groqKey = KeychainManager.retrieve(key: STTProviderType.groq.keychainKey) ?? ""
+        openAIKey = KeychainManager.retrieve(key: STTProviderType.openai.keychainKey) ?? ""
+        deepgramKey = KeychainManager.retrieve(key: STTProviderType.deepgram.keychainKey) ?? ""
+        anthropicKey = KeychainManager.retrieve(key: LLMProviderType.claude.keychainKey) ?? ""
+        googleKey = KeychainManager.retrieve(key: LLMProviderType.google.keychainKey) ?? ""
+    }
+
+}
+
+// MARK: - AccountSection (P1-UX-03)
+
+/// Sidebar section: email + trial state + Sign out + Upgrade link.
+/// Fixes UX audit P0 #7 by giving the signed-in user a real destination
+/// inside Settings rather than the re-sign-in panel they used to land on
+/// when clicking the menubar Account row.
+private struct AccountSection: View {
+    @StateObject private var auth = AuthService.shared
+    @StateObject private var trial = TrialState.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.secondary)
+                    Text("Account")
+                        .font(.title2).fontWeight(.semibold)
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Signed in as")
+                            .font(.caption).foregroundColor(.secondary)
+                        Text(auth.currentUserEmail ?? "Not signed in")
+                            .font(.system(size: 13, weight: .medium))
+                            .textSelection(.enabled)
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Plan")
+                            .font(.caption).foregroundColor(.secondary)
+                        entitlementRow
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Session")
+                            .font(.caption).foregroundColor(.secondary)
+                        HStack {
+                            Button("Sign out", action: confirmAndSignOut)
+                                .controlSize(.regular)
+                                .disabled(!auth.isSignedIn)
+                            Spacer()
+                        }
+                        Text("Trial state stays linked to your email — signing back in restores access.")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                }
+
+                card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Delete account")
+                            .font(.caption).foregroundColor(.secondary)
+                        Text("Email support@sprichapp.com to delete your account and associated trial/license records.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Link("support@sprichapp.com",
+                             destination: URL(string: "mailto:support@sprichapp.com?subject=Delete%20my%20Sprich%20account")!)
+                            .font(.caption)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
-    // MARK: - Local Whisper status row
-
     @ViewBuilder
-    private var localWhisperStatus: some View {
-        let modelName = appState.settings.localWhisperModel
-
-        VStack(alignment: .leading, spacing: 10) {
-
-            // Model tier picker. Lets the user trade speed for accuracy
-            // without leaving Settings. Switching to a different variant
-            // flips the local state to reflect that model's on-disk
-            // presence — typically `.absent`, which surfaces the warning
-            // banner and Download button below.
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Whisper model")
-                    .font(.caption).foregroundColor(.secondary)
-
-                Picker("", selection: Binding(
-                    get: { appState.settings.localWhisperModel },
-                    set: { newValue in
-                        appState.settings.localWhisperModel = newValue
-                        appState.saveSettings()
-                        whisperManager.refreshState(for: newValue)
-                        // Warm the pipe for the newly-selected model if
-                        // it's already on disk. If not, the warning
-                        // banner routes the user to Download.
-                        TranscriptionService.prewarmLocalWhisperIfReady(model: newValue)
-                    }
-                )) {
-                    ForEach(WhisperModelCatalog.all) { option in
-                        Text(option.displayName).tag(option.variantName)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-
-                if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
-                    Text(option.subtitle)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: statusIconName)
-                    .foregroundStyle(statusIconColor)
-                    .font(.system(size: 16))
-
+    private var entitlementRow: some View {
+        switch trial.entitlement {
+        case .trialActive:
+            HStack(spacing: 10) {
+                Image(systemName: "clock.fill").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(modelName)
-                        .font(.system(.caption, design: .monospaced))
-                    Text(statusSubline)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Buy a lifetime license to keep dictating after your trial ends.")
+                        .font(.caption2).foregroundColor(.secondary)
                 }
-
                 Spacer()
-
-                switch whisperManager.state {
-                case .ready:
-                    Button("Delete") {
-                        try? whisperManager.deleteModel(modelName)
-                    }
-                    .controlSize(.small)
-                case .downloading:
-                    Button("Cancel") { whisperManager.cancelDownload() }
-                        .controlSize(.small)
-                case .preparing:
-                    ProgressView().controlSize(.small)
-                default:
-                    Button("Download") { showModelDownload = true }
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
+                Button("Upgrade") {
+                    NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-
-            // Explicit warning when the user has picked Local but the
-            // model isn't downloaded yet — a green-checkmark UI led the
-            // previous tester to think they were good to go and the
-            // first hotkey silently failed.
-            if shouldShowMissingModelWarning {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Local dictation won't work until the model is downloaded.")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(missingModelCallToAction)
-                            .font(.caption).foregroundColor(.secondary)
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.orange.opacity(0.12))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5)
-                )
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(localStatusBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(localStatusBorder, lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Local LLM status row (Sprint 2F)
-
-    /// "Local LLM" provider section shown when the user picks `.local`.
-    /// Mirrors the shape of `localWhisperStatus` so the two on-device
-    /// providers feel like one design system: hardware-eligibility badge,
-    /// model row with download/delete/cancel, and a missing-model warning
-    /// that's friendly rather than punitive.
-    ///
-    /// Decision references:
-    /// - 4-sub-A: model quality picker is a separate row gated by tier
-    ///   (Recommended unlocks; Eligible shows "1B only" + override hint).
-    /// - 5a / 5b / 5c: no cloud-fallback toggle. A user selecting `.local`
-    ///   gets local-only — switching providers is the one and only way to
-    ///   reach a cloud LLM. Honest copy reinforces this.
-    /// - 7a: HardwareProbe.Tier drives badge + latency expectation copy.
-    @ViewBuilder
-    private var localLLMStatus: some View {
-        let spec = LocalLLMModelSpec.defaultSpec
-
-        VStack(alignment: .leading, spacing: 10) {
-
-            // Hardware-eligibility badge — the same probe onboarding ran.
-            hardwareTierBadge
-
-            // Model row — mirrors localWhisperStatus styling.
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: llmStatusIconName)
-                    .foregroundStyle(llmStatusIconColor)
-                    .font(.system(size: 16))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(spec.displayName)
-                        .font(.system(.caption, design: .monospaced))
-                    Text(llmStatusSubline)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
+        case .licensed:
+            Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.green)
+        case .trialExpired:
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill").foregroundStyle(.red)
+                Text("Trial expired").font(.system(size: 13, weight: .medium))
                 Spacer()
-
-                switch llmManager.state {
-                case .ready:
-                    Button("Delete") {
-                        try? llmManager.deleteModel(spec)
-                    }
-                    .controlSize(.small)
-                case .downloading, .verifying:
-                    Button("Cancel") { llmManager.cancelDownload() }
-                        .controlSize(.small)
-                case .preparing:
-                    ProgressView().controlSize(.small)
-                default:
-                    Button("Download (\(formatBytes(spec.expectedSize)))") {
-                        showLLMDownload = true
-                    }
-                    .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!hardwareTier.supportsLocalLLM)
+                Button("Buy lifetime") {
+                    NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-
-            // Decision 4-sub-A: model quality preset row. 1B is the only
-            // Phase 1 ship; 2B / 4B unlock when HardwareProbe = Recommended.
-            // The row stays visible at all tiers so users know what's
-            // possible — disabled when not eligible.
-            if hardwareTier.qualityPresetsUnlocked {
-                qualityPresetRow
-            } else if case .eligible = hardwareTier {
-                Text("Quality presets (Gemma 2 2B / Gemma 3 4B) unlock on 16 GB+ Macs.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
-            // Missing-model warning, same pattern as localWhisperStatus.
-            if shouldShowMissingLLMWarning {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Formal and Custom modes won't work until the AI model is downloaded.")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Default (Literal) mode keeps working — it doesn't use the LLM. Tap Download above when you're on Wi-Fi.")
-                            .font(.caption).foregroundColor(.secondary)
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
-            }
-
-            // 5a/5b/5c honest copy: no fallback, no silent cloud egress.
-            // A user who picked Local explicitly should never be surprised
-            // by a cloud call they didn't authorise.
-            Text("Local LLM runs fully on your Mac. There is no cloud fallback — to use a cloud provider, switch the LLM Provider above. Your transcribed text never leaves the device while Local is selected.")
-                .font(.caption2)
+        case .deviceBlocked:
+            Text("This Mac is associated with another trial. Sign in with the original account, or buy a license to lift the block.")
+                .font(.caption)
                 .foregroundColor(.secondary)
-                .padding(.top, 2)
-
-            HStack {
-                Spacer()
-                Button("Guided setup") { showLLMOnboarding = true }
-                    .controlSize(.small)
-                    .font(.caption2)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(localLLMStatusBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(localLLMStatusBorder, lineWidth: 0.5)
-        )
-    }
-
-    /// 🟢 Recommended / 🟡 Eligible / 🔴 Not supported badge + latency copy.
-    /// "Re-check" lets a user who upgraded RAM flip from 🟡 → 🟢 without
-    /// quitting the app (agenda Decision 7a requirement).
-    @ViewBuilder
-    private var hardwareTierBadge: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(hardwareTierEmoji)
-                .font(.system(size: 14))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Your Mac: \(hardwareTier.displayLabel)")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(hardwareTier.latencyExpectationCopy)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Button("Re-check") {
-                hardwareTier = HardwareProbe.evaluate()
-            }
-            .controlSize(.small)
-            .font(.caption2)
-        }
-    }
-
-    /// Quality preset picker (Recommended tier only). Phase 1 ships 1B as
-    /// the only spec; 2B / 4B labels show as disabled placeholders so the
-    /// UI is honest about what's coming without committing the bytes yet.
-    @ViewBuilder
-    private var qualityPresetRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Local model quality")
-                .font(.caption).foregroundColor(.secondary)
-            Picker("", selection: Binding(
-                get: { appState.settings.localLLMModel },
-                set: { newValue in
-                    appState.settings.localLLMModel = newValue
-                    appState.saveSettings()
-                    // Future P2-LLM expansion: refreshState for the
-                    // newly-selected spec. Phase 1 ships one spec.
-                }
-            )) {
-                Text("Gemma 3 1B (Q4_K_M) — 0.8 GB")
-                    .tag(LocalLLMModelSpec.defaultSpec.id)
-                Text("Gemma 2 2B — coming soon")
-                    .tag("gemma-2-2b-it-q4_k_m")
-                Text("Gemma 3 4B — coming soon")
-                    .tag("gemma-3-4b-it-q4_k_m")
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .disabled(true)  // Phase 1: single spec; 2B/4B unlock in a follow-up sprint.
-
-            Text("More Gemma sizes will ship as quality presets — Phase 1 starts with 1B.")
-                .font(.caption2)
+                .fixedSize(horizontal: false, vertical: true)
+        case .signedOut, .unknown:
+            Text("Sign in from the menubar icon to start your trial.")
+                .font(.caption)
                 .foregroundColor(.secondary)
         }
     }
 
-    private var hardwareTierEmoji: String {
-        switch hardwareTier {
-        case .recommended:   return "🟢"
-        case .eligible:      return "🟡"
-        case .notSupported:  return "🔴"
+    @MainActor
+    private func confirmAndSignOut() {
+        guard auth.isSignedIn else { return }
+        let alert = NSAlert()
+        alert.messageText = "Sign out of Sprich?"
+        alert.informativeText = "Your trial state stays linked to your email — signing back in restores access."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Sign out")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            auth.signOut()
         }
-    }
-
-    private var llmStatusIconName: String {
-        switch llmManager.state {
-        case .ready:                    return "checkmark.circle.fill"
-        case .downloading, .verifying,
-             .preparing:                return "arrow.down.circle"
-        case .failed:                   return "exclamationmark.octagon.fill"
-        default:                        return "circle.dashed"
-        }
-    }
-
-    private var llmStatusIconColor: Color {
-        switch llmManager.state {
-        case .ready:                    return .green
-        case .downloading, .verifying,
-             .preparing:                return .blue
-        case .failed:                   return .red
-        default:                        return .secondary
-        }
-    }
-
-    private var llmStatusSubline: String {
-        switch llmManager.state {
-        case .unknown:                  return "Status not checked yet."
-        case .absent:                   return "Not downloaded."
-        case .downloading(let p):       return "Downloading… \(Int(p * 100))%"
-        case .verifying:                return "Verifying integrity (SHA-256)…"
-        case .preparing:                return "Preparing model…"
-        case .ready(_, let sizeBytes):  return "Ready · \(formatBytes(sizeBytes)) on disk"
-        case .failed(let err):          return err.errorDescription ?? "Setup failed."
-        }
-    }
-
-    private var shouldShowMissingLLMWarning: Bool {
-        // Mirror the local-Whisper guard: only warn when the user has
-        // actively chosen `.local` AND the model isn't ready.
-        guard appState.settings.llmProvider.isLocal else { return false }
-        if case .ready = llmManager.state { return false }
-        if llmManager.state.isBusy { return false }
-        return true
-    }
-
-    private var localLLMStatusBackground: Color {
-        shouldShowMissingLLMWarning
-            ? Color.orange.opacity(0.06)
-            : Color.secondary.opacity(0.06)
-    }
-
-    private var localLLMStatusBorder: Color {
-        shouldShowMissingLLMWarning
-            ? Color.orange.opacity(0.4)
-            : Color.secondary.opacity(0.2)
-    }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useMB, .useGB]
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
-    }
-
-    /// Warning background when the user's staring at a non-functional
-    /// Local provider selection; neutral otherwise.
-    private var localStatusBackground: Color {
-        shouldShowMissingModelWarning
-            ? Color.orange.opacity(0.06)
-            : Color.secondary.opacity(0.08)
-    }
-
-    private var localStatusBorder: Color {
-        shouldShowMissingModelWarning
-            ? Color.orange.opacity(0.3)
-            : Color.clear
-    }
-
-    private var shouldShowMissingModelWarning: Bool {
-        switch whisperManager.state {
-        case .ready, .downloading, .preparing: return false
-        case .absent, .unknown, .failed: return true
-        }
-    }
-
-    /// "~216 MB, one-time." / "~632 MB, one-time." etc, driven by the
-    /// currently-selected model's catalog entry.
-    private var missingModelCallToAction: String {
-        if let option = WhisperModelCatalog.option(
-            for: appState.settings.localWhisperModel
-        ) {
-            return "Click Download above. ~\(option.approxSizeMB) MB, one-time."
-        }
-        return "Click Download above."
-    }
-
-    private var statusIconName: String {
-        switch whisperManager.state {
-        case .ready: return "checkmark.circle.fill"
-        case .downloading: return "arrow.down.circle"
-        case .preparing: return "gearshape.2"
-        case .failed: return "exclamationmark.triangle.fill"
-        case .absent, .unknown: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var statusIconColor: Color {
-        switch whisperManager.state {
-        case .ready: return .green
-        case .failed, .absent, .unknown: return .orange
-        default: return .secondary
-        }
-    }
-
-    private var statusSubline: String {
-        switch whisperManager.state {
-        case .ready(_, let size):
-            let fmt = ByteCountFormatter(); fmt.countStyle = .file
-            let sizeStr = fmt.string(fromByteCount: size)
-            // .ready means bytes on disk. If the pipe hasn't warmed yet
-            // the user needs to know — otherwise a hotkey press blocks
-            // on a load they can't see. The flag flips to true when
-            // LocalWhisperService finishes constructing WhisperKit.
-            if whisperManager.isPipeReady {
-                return "Ready · \(sizeStr) on disk"
-            } else {
-                return "Loading Core ML model… · \(sizeStr) on disk"
-            }
-        case .downloading(let p):
-            return "Downloading \(Int(p * 100))%"
-        case .preparing:
-            return "Preparing (Core ML compile)…"
-        case .failed(let msg):
-            return msg
-        case .absent, .unknown:
-            return "Not downloaded — dictation will not work"
-        }
-    }
-
-    // MARK: - Shared helpers
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        SettingsCard(content: content)
+    }
+}
+
+// MARK: - SettingsCard (shared card chrome for sidebar sections)
+
+/// Shared card chrome used by every sidebar section. Pulled out of
+/// SettingsView's private helper so AccountSection / GeneralSection /
+/// ModesSection / PrivacySection / AboutSection can share one component.
+struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            content()
+            content
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(NSColor.controlBackgroundColor))
@@ -572,296 +342,271 @@ struct SettingsView: View {
                 .strokeBorder(Color.gray.opacity(0.2), lineWidth: 0.5)
         )
     }
+}
 
-    private func saveBar(_ action: @escaping () -> Void = {}) -> some View {
-        HStack {
-            Spacer()
-            Button("Save") {
-                action()
-                appState.saveSettings()
-                showSavedAlert = true
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
+/// Sidebar-section header used by every section. One-liner replacement
+/// for the per-card `sectionHeader` of the old TabView IA.
+struct SettingsSectionHeader: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 24))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.title2).fontWeight(.semibold)
         }
     }
+}
 
-    // MARK: - API Keys Tab
+// MARK: - PrivacySection (P1-UX-11)
 
-    private var apiKeysTab: some View {
+/// Per Decision 4 in sprint-3-settings-ux.md: two cards only.
+/// The live NetworkStatusIndicator is the hero; the inventory link is
+/// the secondary path for skeptics. The "What Sprich never sends" 4-row
+/// checklist that Nico called wishiwashi is cut. The Gemma attribution
+/// string moved to AboutSection (still legally mandatory, just lives
+/// where attribution belongs).
+private struct PrivacySection: View {
+    @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
+
+    var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "lock.shield", title: "Privacy")
 
-                card {
-                    sectionHeader("Speech-to-Text")
-                    apiKeyField(
-                        label: "Groq API Key (recommended)",
-                        text: $groqKey,
-                        url: "https://console.groq.com",
-                        urlLabel: "console.groq.com",
-                        steps: ["Sign up or log in", "Go to API Keys", "Create new key"],
-                        note: "Same key powers the fastest LLM cleanup for Formal mode."
-                    )
-                }
+                SettingsCard {
+                    Text("Network status")
+                        .font(.caption).foregroundColor(.secondary)
 
-                card {
-                    DisclosureGroup(isExpanded: $showAdvancedKeys) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            apiKeyField(
-                                label: "OpenAI API Key",
-                                text: $openAIKey,
-                                url: "https://platform.openai.com/api-keys",
-                                urlLabel: "platform.openai.com",
-                                steps: ["Log in to platform", "Open API Keys page", "Create new secret key"]
-                            )
-                            apiKeyField(
-                                label: "Deepgram API Key",
-                                text: $deepgramKey,
-                                url: "https://console.deepgram.com",
-                                urlLabel: "console.deepgram.com",
-                                steps: ["Create free account", "Go to API Keys", "Create new key"]
-                            )
-                            apiKeyField(
-                                label: "Google API Key (Gemini)",
-                                text: $googleKey,
-                                url: "https://aistudio.google.com/apikey",
-                                urlLabel: "aistudio.google.com",
-                                steps: ["Open Google AI Studio", "Click \"Get API key\"", "Create key — free tier"]
-                            )
-                            apiKeyField(
-                                label: "Anthropic API Key (Claude)",
-                                text: $anthropicKey,
-                                url: "https://console.anthropic.com/settings/keys",
-                                urlLabel: "console.anthropic.com",
-                                steps: ["Log in to Console", "Go to API Keys", "Create key — add credits first"]
-                            )
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(networkIndicator.route.glyph)
+                            .font(.system(size: 28))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(networkIndicator.route.shortLabel)
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(networkStatusStaticCopy)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.top, 8)
-                    } label: {
-                        Text("Advanced — alternative STT / LLM providers")
-                            .font(.system(size: 13, weight: .medium))
+                        Spacer()
                     }
-                }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(networkIndicator.route == .offline
+                                  ? Color.green.opacity(0.10)
+                                  : Color.orange.opacity(0.10))
+                    )
 
-                HStack {
-                    Image(systemName: "lock.shield.fill")
-                        .foregroundColor(.secondary)
-                    Text("Keys are stored securely in macOS Keychain.")
+                    Text("Sprich shows this indicator live on the recording overlay too — green confirms the dictation ran without any network call.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                saveBar { saveKeys() }
-            }
-            .padding(18)
-        }
-    }
-
-    private func apiKeyField(
-        label: String,
-        text: Binding<String>,
-        url: String,
-        urlLabel: String,
-        steps: [String],
-        note: String? = nil
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.secondary)
-            SecureField("", text: text, prompt: Text("sk-…"))
-                .textFieldStyle(.roundedBorder)
-
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("\(index + 1).")
-                                .foregroundColor(.secondary)
-                                .frame(width: 14, alignment: .trailing)
-                            Text(step)
-                        }
-                    }
-                    if let note = note {
-                        Text(note).foregroundColor(.secondary).padding(.top, 2)
-                    }
-                    Link(urlLabel, destination: URL(string: url)!).padding(.top, 2)
-                }
-                .font(.caption)
-                .padding(.top, 4)
-            } label: {
-                Text("How to get this key")
-                    .font(.caption)
-                    .foregroundColor(.accentColor)
-            }
-        }
-    }
-
-    // MARK: - Providers Tab
-
-    private var providersTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-
-                card {
-                    sectionHeader("Speech-to-Text Provider")
-                    Picker("", selection: $appState.settings.sttProvider) {
-                        ForEach(STTProviderType.allCases, id: \.self) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .onChange(of: appState.settings.sttProvider) { _, newValue in
-                        // Keep the reachability read current so the warning
-                        // banner reflects disk state, not a stale cache.
-                        whisperManager.refreshState(
-                            for: appState.settings.localWhisperModel
-                        )
-                        guard newValue.isLocal else { return }
-                        // Warm the pipe in the background if the model is
-                        // already on disk — makes the first dictation after
-                        // provider switch fast instead of 10-30 s slow.
-                        TranscriptionService.prewarmLocalWhisperIfReady(
-                            model: appState.settings.localWhisperModel
-                        )
-                    }
-                    providerDescription(for: appState.settings.sttProvider)
-
-                    if appState.settings.sttProvider.isLocal {
-                        localWhisperStatus
-                    } else if !hasKey(forSTT: appState.settings.sttProvider) {
-                        missingKeyBanner(
-                            providerName: appState.settings.sttProvider.displayName,
-                            kind: "STT"
-                        )
-                    }
-                }
-
-                card {
-                    sectionHeader("LLM Provider (Formal + Custom modes)")
-                    Text("Groq is fastest and reuses the STT key. Change only if you want a different model.")
+                SettingsCard {
+                    Text("Network call inventory")
                         .font(.caption).foregroundColor(.secondary)
+                    Text("Every outbound call Sprich makes is documented in plain language. Available on request — we'll publish it on the website before public launch. If you find a call we haven't disclosed, email us and we'll treat it as a bug.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 8) {
-                        Text("Active:").foregroundColor(.secondary).font(.caption)
-                        Text(appState.settings.llmProvider.displayName)
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-
-                    DisclosureGroup(isExpanded: $showAdvancedLLM) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("", selection: $appState.settings.llmProvider) {
-                                ForEach(LLMProviderType.allCases, id: \.self) { provider in
-                                    Text(provider.displayName).tag(provider)
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.segmented)
-
-                            Group {
-                                switch appState.settings.llmProvider {
-                                case .groq:
-                                    labeledField("Groq Model", text: $appState.settings.groqLLMModel)
-                                    Text("Uses same API key as STT. No extra key needed.")
-                                        .font(.caption).foregroundColor(.secondary)
-                                case .claude:
-                                    labeledField("Claude Model", text: $appState.settings.claudeModel)
-                                case .google:
-                                    labeledField("Gemini Model", text: $appState.settings.googleModel)
-                                case .openai:
-                                    labeledField("OpenAI Model", text: $appState.settings.openAILLMModel)
-                                case .local:
-                                    localLLMStatus
-                                }
-                            }
-
-                            if !hasKey(forLLM: appState.settings.llmProvider) {
-                                missingKeyBanner(
-                                    providerName: appState.settings.llmProvider.displayName,
-                                    kind: "LLM"
-                                )
-                            }
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        Text("Advanced — change LLM provider / model")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-
-                    Text("Literal mode skips LLM entirely — instant output.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-
-                card {
-                    sectionHeader("Language")
-                    Picker("", selection: Binding(
-                        get: { appState.settings.preferredLanguage ?? "auto" },
-                        set: { appState.settings.preferredLanguage = $0 == "auto" ? nil : $0 }
-                    )) {
-                        ForEach(AppLanguages.all, id: \.code) { lang in
-                            Text(lang.displayName).tag(lang.code ?? "auto")
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    Text("Pin STT to a specific language, or let the provider detect it.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-
-                saveBar()
-            }
-            .padding(18)
-        }
-    }
-
-    private func labeledField(_ label: String, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundColor(.secondary)
-            TextField("", text: text).textFieldStyle(.roundedBorder)
-        }
-    }
-
-    // MARK: - Modes Tab
-
-    private var modesTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-
-                card {
                     HStack {
-                        sectionHeader("Literal Mode")
+                        Link("Email support@sprichapp.com",
+                             destination: URL(string: "mailto:support@sprichapp.com?subject=Network%20call%20inventory%20request")!)
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Present-tense framing for the static Settings card (the recording
+    /// overlay uses past-tense "stayed" to confirm what just happened).
+    private var networkStatusStaticCopy: String {
+        switch networkIndicator.route {
+        case .offline:
+            return "Sprich is configured to keep your audio and text on this Mac."
+        default:
+            return networkIndicator.route.tooltip
+        }
+    }
+}
+
+// MARK: - AboutSection (P1-UX-12)
+
+/// Version (dynamic, not hardcoded — UX audit P0 #5 fix) + Sprich
+/// tagline + trial/licensed state row + AI model attributions
+/// (Whisper + Gemma) including the legally mandatory Gemma Terms
+/// reference string (Sprint 2F locked decision: lives somewhere; moved
+/// here from Privacy per Decision 4).
+private struct AboutSection: View {
+    @StateObject private var trial = TrialState.shared
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "info.circle", title: "About")
+
+                SettingsCard {
+                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
+                    HStack(spacing: 12) {
+                        Image("SprichLogo")
+                            .resizable()
+                            .frame(width: 40, height: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sprich").font(.system(size: 15, weight: .semibold))
+                            Text("Version \(appVersion)")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("Speech-to-text for macOS")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    // Trial / licensed state row (UX audit P0 #4 surface).
+                    switch trial.entitlement {
+                    case .trialActive:
+                        Divider().padding(.vertical, 4)
+                        HStack {
+                            Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
+                                .font(.caption)
+                            Spacer()
+                            Button("Upgrade to lifetime") {
+                                NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    case .licensed:
+                        Divider().padding(.vertical, 4)
+                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
+                        EmptyView()
+                    }
+                }
+
+                SettingsCard {
+                    Text("AI model attributions")
+                        .font(.caption).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Speech-to-text runs on-device with Whisper via WhisperKit when you pick \"On this Mac\". Cloud STT routes to your chosen provider (Groq, OpenAI, or Deepgram) using your own API key.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("AI cleanup runs on-device with Gemma 3 by Google via llama.cpp when you pick \"On this Mac\". Cloud cleanup routes to your chosen provider (Groq, Claude, Gemini, or OpenAI) using your own API key.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // Sprint 2F mandatory Gemma attribution string (verbatim).
+                        // Relocated from the Privacy tab to About per Decision 4.
+                        Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                    }
+                }
+
+                SettingsCard {
+                    Text("Legal")
+                        .font(.caption).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Link("Privacy policy",
+                             destination: URL(string: "https://sprichapp.com/privacy")!)
+                            .font(.caption)
+                        Link("Terms of service",
+                             destination: URL(string: "https://sprichapp.com/terms")!)
+                            .font(.caption)
+                        Link("Imprint",
+                             destination: URL(string: "https://sprichapp.com/imprint")!)
+                            .font(.caption)
+                    }
+                }
+
+                SettingsCard {
+                    Text("Support")
+                        .font(.caption).foregroundColor(.secondary)
+                    Link("support@sprichapp.com",
+                         destination: URL(string: "mailto:support@sprichapp.com")!)
+                        .font(.caption)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+// MARK: - ModesSection (P1-UX-05 + P1-UX-06)
+
+/// Three mode editors (Literal / Formal / Custom). The mode-per-hotkey
+/// surface is Sprich's #1 differentiator per the OW audit — this section
+/// stays a first-class destination. Each mode has its system-prompt
+/// editor + hotkey display + Reset-to-default. Formal also has the
+/// adapt-tone-to-destination-app toggle. Autosaves on field commit.
+private struct ModesSection: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "text.quote", title: "Modes")
+
+                Text("Three dictation modes, each on its own hotkey. Pick the right one as you press — no menus, no settings round-trip.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SettingsCard {
+                    HStack {
+                        Text("Literal").font(.system(size: 13, weight: .semibold))
                         Spacer()
                         shortcutChip("Fn + Shift")
                     }
-                    Text("Fast clean-up via STT only (no LLM). Punctuation and capitalization polished locally.")
+                    Text("Fast clean-up via Whisper only (no AI rewrite). Punctuation and capitalization polished locally.")
                         .font(.caption).foregroundColor(.secondary)
-
-                    promptEditor($appState.settings.literalPrompt, charLimit: 500)
-
+                    promptEditor($appState.settings.literalPrompt)
                     HStack {
-                        Button("Reset to Default") {
+                        Button("Reset to default") {
                             appState.settings.literalPrompt = TranscriptionMode.literal.defaultSystemPrompt
+                            appState.saveSettings()
                         }
                         .font(.caption)
                         Spacer()
                     }
+                    .onChange(of: appState.settings.literalPrompt) { _, _ in
+                        appState.saveSettings()
+                    }
                 }
 
-                card {
+                SettingsCard {
                     HStack {
-                        sectionHeader("Formal Mode")
+                        Text("Formal").font(.system(size: 13, weight: .semibold))
                         Spacer()
                         shortcutChip("Fn + Control")
                     }
-                    Text("Full LLM rewrite for professional written text.")
+                    Text("Full AI rewrite for professional written text.")
                         .font(.caption).foregroundColor(.secondary)
-
-                    promptEditor($appState.settings.formalPrompt, charLimit: 500)
-
+                    promptEditor($appState.settings.formalPrompt)
                     HStack {
-                        Button("Reset to Default") {
+                        Button("Reset to default") {
                             appState.settings.formalPrompt = TranscriptionMode.formal.defaultSystemPrompt
+                            appState.saveSettings()
                         }
                         .font(.caption)
                         Spacer()
@@ -871,67 +616,83 @@ struct SettingsView: View {
 
                     Toggle("Adapt tone to destination app", isOn: $appState.settings.adaptToSurface)
                         .toggleStyle(.switch)
-                    Text("Matches the rewrite to where you're pasting — email greeting for Gmail/Mail, terse for Slack/Teams/Messages, clean prose for docs. Reads the active browser tab URL for web apps (requires one-time Automation permission).")
+                        .onChange(of: appState.settings.adaptToSurface) { _, _ in
+                            appState.saveSettings()
+                        }
+                    Text("Matches the rewrite to where you're pasting — email greeting for Gmail/Mail, terse for Slack/Teams/Messages, clean prose for docs. Reads the active browser tab URL for web apps (one-time Automation permission).")
                         .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: appState.settings.formalPrompt) { _, _ in
+                        appState.saveSettings()
+                    }
                 }
 
-                card {
+                SettingsCard {
                     HStack {
-                        sectionHeader("Custom Mode")
+                        Text("Custom").font(.system(size: 13, weight: .semibold))
                         Spacer()
                         shortcutChip("Fn + Command")
                     }
 
                     Toggle("Enable custom mode", isOn: $appState.settings.customModeEnabled)
                         .toggleStyle(.switch)
+                        .onChange(of: appState.settings.customModeEnabled) { _, _ in
+                            appState.saveSettings()
+                        }
 
                     if appState.settings.customModeEnabled {
                         Divider().padding(.vertical, 4)
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Name").font(.caption).foregroundColor(.secondary)
-                                    TextField("", text: $appState.settings.customModeName,
-                                              prompt: Text("Slack"))
-                                        .textFieldStyle(.roundedBorder)
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Badge").font(.caption).foregroundColor(.secondary)
-                                    TextField("", text: Binding(
-                                        get: { appState.settings.customModeBadge },
-                                        set: { appState.settings.customModeBadge = String($0.prefix(1)).uppercased() }
-                                    ))
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 60)
-                                }
-                            }
-
+                        HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("System prompt")
-                                        .font(.caption).foregroundColor(.secondary)
-                                    Spacer()
-                                    Text("\(appState.settings.customModePrompt.count) / 400")
-                                        .font(.caption2)
-                                        .foregroundColor(appState.settings.customModePrompt.count >= 400 ? .orange : .secondary)
-                                }
-                                promptEditor(Binding(
-                                    get: { appState.settings.customModePrompt },
-                                    set: { appState.settings.customModePrompt = String($0.prefix(400)) }
-                                ), charLimit: 400)
+                                Text("Name").font(.caption).foregroundColor(.secondary)
+                                TextField("", text: $appState.settings.customModeName,
+                                          prompt: Text("Slack"))
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit { appState.saveSettings() }
                             }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Badge").font(.caption).foregroundColor(.secondary)
+                                TextField("", text: Binding(
+                                    get: { appState.settings.customModeBadge },
+                                    set: {
+                                        appState.settings.customModeBadge = String($0.prefix(1)).uppercased()
+                                        appState.saveSettings()
+                                    }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 60)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("System prompt")
+                                    .font(.caption).foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(appState.settings.customModePrompt.count) / 400")
+                                    .font(.caption2)
+                                    .foregroundColor(appState.settings.customModePrompt.count >= 400 ? .orange : .secondary)
+                            }
+                            promptEditor(Binding(
+                                get: { appState.settings.customModePrompt },
+                                set: {
+                                    appState.settings.customModePrompt = String($0.prefix(400))
+                                    appState.saveSettings()
+                                }
+                            ))
                         }
                     }
                 }
 
-                saveBar()
+                Spacer(minLength: 0)
             }
-            .padding(18)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
-    private func promptEditor(_ text: Binding<String>, charLimit: Int) -> some View {
+    private func promptEditor(_ text: Binding<String>) -> some View {
         TextEditor(text: text)
             .font(.system(size: 12, design: .monospaced))
             .scrollContentBackground(.hidden)
@@ -953,202 +714,26 @@ struct SettingsView: View {
             .foregroundColor(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.gray.opacity(0.15))
-            )
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.15)))
     }
+}
 
-    // MARK: - Dictionary Tab
+// MARK: - GeneralSection (P1-UX-04 + P1-UX-06)
 
-    private var dictionaryTab: some View {
+/// Input mode + max recording duration + keyboard shortcuts read-out +
+/// permissions. About content moved to AboutSection (P1-UX-12).
+/// Autosaves on field commit (P1-UX-06) — no Save button.
+private struct GeneralSection: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "gear", title: "General")
 
-                card {
-                    sectionHeader("Vocabulary (Whisper bias)")
-                    Text("Comma-separated terms Whisper should prefer. Great for names, brands, technical jargon. Kept under ~200 tokens.")
+                SettingsCard {
+                    Text("Input mode")
                         .font(.caption).foregroundColor(.secondary)
-
-                    promptEditor($appState.settings.glossaryTerms, charLimit: 800)
-                }
-
-                card {
-                    sectionHeader("Replacements (post-STT)")
-                    Text("Exact find → replace pairs applied after transcription. Case-insensitive, whole-word where possible.")
-                        .font(.caption).foregroundColor(.secondary)
-
-                    if appState.settings.glossaryReplacements.isEmpty {
-                        Text("No replacements yet.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .italic()
-                            .padding(.vertical, 4)
-                    } else {
-                        VStack(spacing: 6) {
-                            ForEach($appState.settings.glossaryReplacements) { $rep in
-                                HStack(spacing: 8) {
-                                    TextField("", text: $rep.from, prompt: Text("from"))
-                                        .textFieldStyle(.roundedBorder)
-                                    Image(systemName: "arrow.right")
-                                        .foregroundColor(.secondary)
-                                        .font(.caption)
-                                    TextField("", text: $rep.to, prompt: Text("to"))
-                                        .textFieldStyle(.roundedBorder)
-                                    Button {
-                                        appState.settings.glossaryReplacements.removeAll { $0.id == rep.id }
-                                    } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .foregroundColor(.red.opacity(0.75))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                    }
-
-                    Divider().padding(.vertical, 2)
-
-                    HStack(spacing: 8) {
-                        TextField("", text: $newGlossaryFrom, prompt: Text("From"))
-                            .textFieldStyle(.roundedBorder)
-                        Image(systemName: "arrow.right")
-                            .foregroundColor(.secondary)
-                            .font(.caption)
-                        TextField("", text: $newGlossaryTo, prompt: Text("To"))
-                            .textFieldStyle(.roundedBorder)
-                        Button {
-                            let from = newGlossaryFrom.trimmingCharacters(in: .whitespaces)
-                            let to = newGlossaryTo.trimmingCharacters(in: .whitespaces)
-                            guard !from.isEmpty else { return }
-                            appState.settings.glossaryReplacements.append(
-                                GlossaryReplacement(from: from, to: to)
-                            )
-                            newGlossaryFrom = ""
-                            newGlossaryTo = ""
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundColor(.accentColor)
-                                .font(.title3)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                saveBar()
-            }
-            .padding(18)
-        }
-    }
-
-    // MARK: - Privacy Tab (Sprint 2F)
-
-    /// Static + live disclosure of what Sprich does and doesn't do with the
-    /// network. Honest backstop to the recording-overlay indicator: when a
-    /// curious user opens Settings to verify the "fully local" claim, this
-    /// is the page that has to be true and complete.
-    ///
-    /// Spec: `~/Claude/40_Projects/Sprich/network-off-proof-ui-spec.md`
-    /// § Surface 3.
-    @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
-
-    private var privacyTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-
-                card {
-                    sectionHeader("Network status")
-
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(networkIndicator.route.glyph)
-                            .font(.system(size: 22))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(networkIndicator.route.shortLabel)
-                                .font(.system(size: 14, weight: .semibold))
-                            Text(networkIndicator.route.tooltip)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer()
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(networkIndicator.route == .offline
-                                ? Color.green.opacity(0.08)
-                                : Color.orange.opacity(0.08))
-                    )
-
-                    Text("Sprich shows this indicator live on the recording overlay too — green means the dictation runs without any network call this session.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                card {
-                    sectionHeader("What Sprich never sends")
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Audio recordings — held in memory, never written to disk, never uploaded.", systemImage: "checkmark")
-                            .font(.caption)
-                        Label("Analytics or telemetry — zero SDKs linked, no event beacons.", systemImage: "checkmark")
-                            .font(.caption)
-                        Label("Dictation content to Sprich's servers — our endpoints don't accept transcripts at all.", systemImage: "checkmark")
-                            .font(.caption)
-                        Label("Auto-update probes — Sprich doesn't ship an auto-updater.", systemImage: "checkmark")
-                            .font(.caption)
-                    }
-                    .foregroundColor(.secondary)
-                }
-
-                card {
-                    sectionHeader("Full network-call inventory")
-                    Text("Every outbound call Sprich makes is documented in plain language. If you find a call we haven't disclosed, please email support@sprichapp.com — we'd consider it a bug.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack {
-                        Button("Read the network-call inventory") {
-                            if let url = URL(string: "https://sprichapp.com/network-calls") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }
-                        .controlSize(.small)
-                        Spacer()
-                    }
-                    .padding(.top, 4)
-                }
-
-                card {
-                    sectionHeader("AI model attribution")
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Speech-to-text uses Whisper (OpenAI), running on-device via WhisperKit.")
-                            .font(.caption)
-                        Text("Local AI cleanup uses Gemma 3 by Google, running on-device via llama.cpp.")
-                            .font(.caption)
-                        Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 4)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(18)
-        }
-    }
-
-    // MARK: - General Tab
-
-    private var generalTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-
-                card {
-                    sectionHeader("Input Mode")
                     Picker("", selection: $appState.settings.inputMode) {
                         ForEach(InputMode.allCases, id: \.self) { mode in
                             Text(mode.displayName).tag(mode)
@@ -1156,34 +741,43 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
+                    .onChange(of: appState.settings.inputMode) { _, _ in
+                        appState.saveSettings()
+                    }
                 }
 
-                card {
-                    sectionHeader("Safety")
+                SettingsCard {
+                    Text("Safety")
+                        .font(.caption).foregroundColor(.secondary)
                     Stepper(
                         "Max recording: \(appState.settings.maxRecordingDuration)s",
                         value: $appState.settings.maxRecordingDuration,
                         in: 30...600,
                         step: 30
                     )
+                    .onChange(of: appState.settings.maxRecordingDuration) { _, _ in
+                        appState.saveSettings()
+                    }
                 }
 
-                card {
-                    sectionHeader("Keyboard Shortcuts")
+                SettingsCard {
+                    Text("Keyboard shortcuts")
+                        .font(.caption).foregroundColor(.secondary)
                     VStack(spacing: 8) {
-                        shortcutRow(name: "Literal Mode", keys: "Fn + Shift")
-                        shortcutRow(name: "Formal Mode", keys: "Fn + Control")
+                        shortcutRow(name: "Literal mode", keys: "Fn + Shift")
+                        shortcutRow(name: "Formal mode", keys: "Fn + Control")
                         if appState.settings.customModeEnabled {
                             shortcutRow(
-                                name: appState.settings.customModeName.isEmpty ? "Custom Mode" : appState.settings.customModeName,
+                                name: appState.settings.customModeName.isEmpty ? "Custom mode" : appState.settings.customModeName,
                                 keys: "Fn + Command"
                             )
                         }
                     }
                 }
 
-                card {
-                    sectionHeader("Permissions")
+                SettingsCard {
+                    Text("Permissions")
+                        .font(.caption).foregroundColor(.secondary)
                     permissionRow(
                         name: "Accessibility",
                         granted: Permissions.isAccessibilityGranted(),
@@ -1196,52 +790,10 @@ struct SettingsView: View {
                     )
                 }
 
-                card {
-                    sectionHeader("About")
-                    // Dynamic version from Info.plist (L3.1) — previously
-                    // hardcoded "v1.0.0" drifted from real releases. Tagline
-                    // also lost the "Open-source" claim that conflicts with
-                    // the commercial AppSumo positioning + BUSL relicensing.
-                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
-                    HStack {
-                        Image("SprichLogo")
-                            .resizable()
-                            .frame(width: 32, height: 32)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Sprich v\(appVersion)").font(.system(size: 13, weight: .semibold))
-                            Text("Speech-to-text for macOS")
-                                .font(.caption).foregroundColor(.secondary)
-                        }
-                    }
-
-                    // Upgrade / license state (L3.2 — audit P0 #4 surface 4).
-                    // Trial-active: nudge to lifetime. Licensed: confirmation
-                    // badge. Other states: nothing (signed-out / unknown /
-                    // expired all have stronger surfaces elsewhere — the
-                    // menubar trial-expired row, the lock view, sign-in).
-                    switch trial.entitlement {
-                    case .trialActive:
-                        Button {
-                            if let url = URL(string: "https://sprichapp.com/pricing") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        } label: {
-                            Text("Upgrade to lifetime")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    case .licensed:
-                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
-                        EmptyView()
-                    }
-                }
-
-                saveBar()
+                Spacer(minLength: 0)
             }
-            .padding(18)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -1249,7 +801,12 @@ struct SettingsView: View {
         HStack {
             Text(name)
             Spacer()
-            shortcutChip(keys)
+            Text(keys)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.15)))
         }
     }
 
@@ -1263,7 +820,9 @@ struct SettingsView: View {
                 Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                 Text("Granted").font(.caption).foregroundColor(.secondary)
             } else {
-                Image(systemName: "xmark.circle.fill").foregroundColor(.red.opacity(0.8))
+                // Orange instead of red (UX audit P2 — match Onboarding
+                // tone: orange = action needed, red = blocking error).
+                Image(systemName: "xmark.circle.fill").foregroundColor(.orange)
                 if let action = action {
                     Button("Open Settings", action: action)
                         .controlSize(.small)
@@ -1273,104 +832,924 @@ struct SettingsView: View {
             }
         }
     }
+}
 
-    // MARK: - Helpers
+// MARK: - AIModelsSection (P1-UX-08 — STT half; P1-UX-09 lands LLM half + sidebar wiring)
 
-    private func providerDescription(for provider: STTProviderType) -> some View {
-        Group {
-            switch provider {
-            case .groq:
-                Text("Fastest & cheapest (~$0.0007/min). Uses Whisper model via Groq cloud.")
-            case .openai:
-                Text("Standard Whisper API (~$0.006/min). Most reliable.")
-            case .deepgram:
-                Text("Nova-3 model (~$0.008/min). Excellent real-time performance.")
-            case .local:
-                Text("Runs fully on-device with WhisperKit — no network, no API key. Pick a tier below.")
+/// Load-bearing section of the sidebar IA. Two stacked sub-sections —
+/// Speech recognition + AI cleanup — each rendered as a `ProviderCardPair`
+/// (Cloud / On this Mac) with a context-aware config view below.
+///
+/// Decision 2 in `sprint-3-settings-ux.md`. This commit lands the section
+/// shell + the Speech-recognition half. The AI-cleanup half is stubbed
+/// pending P1-UX-09, after which the sidebar switch in `SettingsView.body`
+/// swaps `sectionPlaceholder(.aiModels)` for this view.
+private struct AIModelsSection: View {
+    @EnvironmentObject var appState: AppState
+
+    @Binding var groqKey: String
+    @Binding var openAIKey: String
+    @Binding var deepgramKey: String
+    @Binding var anthropicKey: String
+    @Binding var googleKey: String
+
+    @Binding var hardwareTier: HardwareProbe.Tier
+    let onRequestWhisperDownload: () -> Void
+    let onRequestLLMDownload: () -> Void
+
+    /// Sprint 3 polish #5 — STT/LLM "Configure" disclosures collapsed by
+    /// default. Per-card so toggling one doesn't move the other.
+    @State private var sttConfigExpanded = false
+    @State private var llmConfigExpanded = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "brain", title: "AI Models")
+
+                Text("Pick where the Model runs.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                speechRecognitionCard
+
+                aiCleanupCard
+
+                languageCard
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    // MARK: Language pin (P1-UX-10)
+
+    /// Optional language hint passed to the STT provider. nil = auto-detect,
+    /// which Whisper handles well for ~98% of cases; pinning is the escape
+    /// hatch when auto-detect picks the wrong tongue mid-sentence (the user
+    /// pain point that drove this row to be first-class).
+    @ViewBuilder
+    private var languageCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Language")
+                    .font(.system(size: 13, weight: .semibold))
+                Picker("", selection: Binding(
+                    get: { appState.settings.preferredLanguage ?? "auto" },
+                    set: { newValue in
+                        appState.settings.preferredLanguage = newValue == "auto" ? nil : newValue
+                        appState.saveSettings()
+                    }
+                )) {
+                    ForEach(AppLanguages.all, id: \.code) { lang in
+                        Text(lang.displayName).tag(lang.code ?? "auto")
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Text("Pin speech recognition to a specific language, or let the provider detect it.")
+                    .font(.caption).foregroundColor(.secondary)
             }
         }
-        .font(.caption)
-        .foregroundColor(.secondary)
     }
 
-    // MARK: - Key validation
+    // MARK: Speech recognition (P1-UX-08)
 
-    private func hasKey(forSTT provider: STTProviderType) -> Bool {
-        // Re-read from Keychain each body re-eval; cheap and always current.
-        _ = groqKey; _ = openAIKey; _ = deepgramKey  // force dependency on @State
-        // Local provider needs a downloaded model, not an API key —
-        // treat as "has key" so the missing-key banner doesn't fire.
-        if provider.isLocal { return true }
-        guard let v = KeychainManager.retrieve(key: provider.keychainKey) else { return false }
-        return !v.isEmpty
-    }
+    @ViewBuilder
+    private var speechRecognitionCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Speech recognition")
+                    .font(.system(size: 13, weight: .semibold))
 
-    private func hasKey(forLLM provider: LLMProviderType) -> Bool {
-        _ = groqKey; _ = openAIKey; _ = anthropicKey; _ = googleKey
-        switch provider {
-        case .groq:
-            // Reuses Groq STT key
-            guard let v = KeychainManager.retrieve(key: STTProviderType.groq.keychainKey) else { return false }
-            return !v.isEmpty
-        case .claude, .google, .openai:
-            guard let v = KeychainManager.retrieve(key: provider.keychainKey) else { return false }
-            return !v.isEmpty
-        case .local:
-            // Local LLM needs a model on disk, not a key. The model-readiness
-            // check is owned by `LLMModelManager.state` (P2-LLM-05) and the
-            // Settings "Local LLM" section reads it directly; the
-            // missing-key banner never applies.
-            return true
+                ProviderCardPair(
+                    isLocalSelected: appState.settings.sttProvider.isLocal,
+                    cloudTitle: "Cloud",
+                    cloudIcon: "cloud",
+                    cloudSubtitle: "API Key required / Fastest response time",
+                    cloudDescription: "Audio sent to chosen provider for transcription.",
+                    localTitle: "On this Mac",
+                    localIcon: "laptopcomputer",
+                    localSubtitle: "Private / No API Key",
+                    localDescription: "Runs fully on-device. Slightly slower.",
+                    onSelectCloud: selectCloudSTT,
+                    onSelectLocal: selectLocalSTT
+                )
+
+                // Sprint 3 polish #9 — when cloud is selected but no key
+                // is in Keychain yet, surface the warning at the card level
+                // (above the disclosure) so the user can't miss it.
+                if isSTTKeyMissing {
+                    missingKeyWarning(providerName: appState.settings.sttProvider.displayName,
+                                      expandAction: { sttConfigExpanded = true })
+                }
+
+                // Sprint 3 polish #5 — provider details collapsed by default
+                // so the page reads as two clean choices first. User expands
+                // to paste an API key, swap quality preset, etc.
+                DisclosureGroup(isExpanded: $sttConfigExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if appState.settings.sttProvider.isLocal {
+                            LocalProviderConfigView(
+                                kind: .stt,
+                                hardwareTier: $hardwareTier,
+                                onRequestDownload: onRequestWhisperDownload
+                            )
+                            .environmentObject(appState)
+                        } else {
+                            CloudProviderConfigView(
+                                kind: .stt,
+                                groqKey: $groqKey,
+                                openAIKey: $openAIKey,
+                                deepgramKey: $deepgramKey,
+                                anthropicKey: $anthropicKey,
+                                googleKey: $googleKey
+                            )
+                            .environmentObject(appState)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text(appState.settings.sttProvider.isLocal
+                         ? "Configure on-device speech recognition"
+                         : "Configure cloud provider")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.accentColor)
+                }
+            }
         }
     }
 
-    private func missingKeyBanner(providerName: String, kind: String) -> some View {
+    private func selectCloudSTT() {
+        // Default cloud STT pick is Groq — fastest, cheapest, and the same
+        // key powers Groq LLM cleanup so most users have it already. The
+        // sub-picker inside `CloudProviderConfigView` lets users move from
+        // there to OpenAI or Deepgram.
+        guard appState.settings.sttProvider.isLocal else { return }
+        appState.settings.sttProvider = .groq
+        appState.saveSettings()
+    }
+
+    private func selectLocalSTT() {
+        guard !appState.settings.sttProvider.isLocal else { return }
+        appState.settings.sttProvider = .local
+        appState.saveSettings()
+        // Refresh state so the warning-banner reflects on-disk truth.
+        WhisperModelManager.shared.refreshState(
+            for: appState.settings.localWhisperModel
+        )
+        TranscriptionService.prewarmLocalWhisperIfReady(
+            model: appState.settings.localWhisperModel
+        )
+    }
+
+    // MARK: AI cleanup (P1-UX-09)
+
+    @ViewBuilder
+    private var aiCleanupCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("AI cleanup")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("For Formal and Custom Modes.")
+                    .font(.caption).foregroundColor(.secondary)
+
+                ProviderCardPair(
+                    isLocalSelected: appState.settings.llmProvider.isLocal,
+                    cloudTitle: "Cloud",
+                    cloudIcon: "cloud",
+                    cloudSubtitle: "API Key required / Fastest response time",
+                    cloudDescription: "Transcribed text is sent to chosen provider for cleanup. No storage required.",
+                    localTitle: "On this Mac",
+                    localIcon: "laptopcomputer",
+                    localSubtitle: "Private / No API Key",
+                    localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
+                    onSelectCloud: selectCloudLLM,
+                    onSelectLocal: selectLocalLLM
+                )
+
+                // Sprint 3 polish #9 — same shape as STT card.
+                if isLLMKeyMissing {
+                    missingKeyWarning(providerName: appState.settings.llmProvider.displayName,
+                                      expandAction: { llmConfigExpanded = true })
+                }
+
+                // Sprint 3 polish #5 — collapsed by default; matches the
+                // STT card's shape.
+                DisclosureGroup(isExpanded: $llmConfigExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if appState.settings.llmProvider.isLocal {
+                            LocalProviderConfigView(
+                                kind: .llm,
+                                hardwareTier: $hardwareTier,
+                                onRequestDownload: onRequestLLMDownload
+                            )
+                            .environmentObject(appState)
+                        } else {
+                            CloudProviderConfigView(
+                                kind: .llm,
+                                groqKey: $groqKey,
+                                openAIKey: $openAIKey,
+                                deepgramKey: $deepgramKey,
+                                anthropicKey: $anthropicKey,
+                                googleKey: $googleKey
+                            )
+                            .environmentObject(appState)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text(appState.settings.llmProvider.isLocal
+                         ? "Configure on-device AI cleanup"
+                         : "Configure cloud provider")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.accentColor)
+                }
+            }
+        }
+    }
+
+    private func selectCloudLLM() {
+        guard appState.settings.llmProvider.isLocal else { return }
+        // Default cloud LLM pick is Groq — reuses the STT key, so the
+        // most common path is "user already has a Groq key, just flip
+        // the card." Sub-picker in CloudProviderConfigView lets them
+        // move to Claude / Gemini / OpenAI from there.
+        appState.settings.llmProvider = .groq
+        appState.saveSettings()
+    }
+
+    private func selectLocalLLM() {
+        guard !appState.settings.llmProvider.isLocal else { return }
+        // Sprint 2F Decision 7a: still let the user pick Local even on
+        // Eligible hardware — the warning copy + disabled Download
+        // button surfaces the constraint. .notSupported is the only
+        // block, and we don't guard here (the warning + disabled
+        // button do the work).
+        appState.settings.llmProvider = .local
+        appState.saveSettings()
+        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.defaultSpec)
+    }
+
+    // MARK: Missing-key warning (Sprint 3 polish #9)
+
+    /// True when the user selected a cloud STT provider but no key for
+    /// that provider is in Keychain yet. Reads the @State key binding
+    /// (kept in sync by CloudProviderConfigView's onChange-to-Keychain
+    /// autosave), so flipping providers or pasting a key re-evaluates
+    /// immediately.
+    private var isSTTKeyMissing: Bool {
+        switch appState.settings.sttProvider {
+        case .local:    return false
+        case .groq:     return groqKey.isEmpty
+        case .openai:   return openAIKey.isEmpty
+        case .deepgram: return deepgramKey.isEmpty
+        }
+    }
+
+    private var isLLMKeyMissing: Bool {
+        switch appState.settings.llmProvider {
+        case .local:  return false
+        case .groq:   return groqKey.isEmpty
+        case .claude: return anthropicKey.isEmpty
+        case .google: return googleKey.isEmpty
+        case .openai: return openAIKey.isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private func missingKeyWarning(providerName: String,
+                                   expandAction: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Missing API key for \(providerName)")
                     .font(.system(size: 12, weight: .semibold))
-                Text("Add your \(providerName) key on the API Keys tab — \(kind) calls will fail until then.")
-                    .font(.caption).foregroundColor(.secondary)
+                Text("Dictation will fail until you add it.")
+                    .font(.caption2).foregroundColor(.secondary)
             }
+            Spacer()
+            Button("Add key", action: expandAction)
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
+    }
+}
+
+// MARK: - AIModelsSection building blocks (P1-UX-07)
+
+/// Distinguishes a Speech-recognition row from an AI-cleanup row. The two
+/// halves of `AIModelsSection` share the same Cloud/Local config view shape;
+/// `ProviderKind` flips wording, picker contents, and (for local) whether
+/// the HardwareProbe badge appears (LLM-only — STT runs anywhere).
+private enum ProviderKind {
+    case stt
+    case llm
+}
+
+/// Cloud branch of the AI Models config (P1-UX-07).
+///
+/// Decision 3 in `sprint-3-settings-ux.md`: cloud config is *almost* fully
+/// visible — the only thing tucked away is the model-name string, which
+/// 95% of users don't touch. Layout:
+///   1. Cloud sub-provider segmented picker (Groq / OpenAI / Deepgram for
+///      STT; Groq / Claude / Gemini / OpenAI for LLM).
+///   2. Inline API-key SecureField for the currently-selected sub-provider.
+///      Edits write straight to Keychain on field commit — no Save button.
+///   3. "Advanced — model name" `DisclosureGroup` (LLM only) for the
+///      model-string field. STT model strings are baked into each provider,
+///      so the disclosure isn't shown for `.stt`.
+private struct CloudProviderConfigView: View {
+    @EnvironmentObject var appState: AppState
+    let kind: ProviderKind
+
+    @Binding var groqKey: String
+    @Binding var openAIKey: String
+    @Binding var deepgramKey: String
+    @Binding var anthropicKey: String
+    @Binding var googleKey: String
+
+    @State private var showAdvanced = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            subProviderPicker
+            keyField
+            if kind == .llm {
+                advancedDisclosure
+            }
+        }
+    }
+
+    // MARK: Sub-picker
+
+    @ViewBuilder
+    private var subProviderPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(kind == .stt ? "Cloud provider" : "Cloud provider")
+                .font(.caption).foregroundColor(.secondary)
+            switch kind {
+            case .stt:
+                Picker("", selection: sttCloudBinding) {
+                    Text("Groq").tag(STTProviderType.groq)
+                    Text("OpenAI").tag(STTProviderType.openai)
+                    Text("Deepgram").tag(STTProviderType.deepgram)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            case .llm:
+                Picker("", selection: llmCloudBinding) {
+                    Text("Groq").tag(LLMProviderType.groq)
+                    Text("Claude").tag(LLMProviderType.claude)
+                    Text("Gemini").tag(LLMProviderType.google)
+                    Text("OpenAI").tag(LLMProviderType.openai)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+            Text(currentProviderBlurb)
+                .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Bound to `appState.settings.sttProvider` but guarded against writes of
+    /// `.local` (the local branch is shown by `LocalProviderConfigView`, not
+    /// this view, so the segmented picker's tag set is cloud-only). If the
+    /// upstream value is somehow `.local` when this view is on screen, fall
+    /// back to `.groq` for display so the picker doesn't crash.
+    private var sttCloudBinding: Binding<STTProviderType> {
+        Binding(
+            get: {
+                let p = appState.settings.sttProvider
+                return p.isLocal ? .groq : p
+            },
+            set: { newValue in
+                appState.settings.sttProvider = newValue
+                appState.saveSettings()
+            }
+        )
+    }
+
+    private var llmCloudBinding: Binding<LLMProviderType> {
+        Binding(
+            get: {
+                let p = appState.settings.llmProvider
+                return p.isLocal ? .groq : p
+            },
+            set: { newValue in
+                appState.settings.llmProvider = newValue
+                appState.saveSettings()
+            }
+        )
+    }
+
+    private var currentProviderBlurb: String {
+        switch kind {
+        case .stt:
+            switch appState.settings.sttProvider {
+            case .groq:     return "Fastest & cheapest (~$0.0007/min). Whisper large-v3 via Groq cloud."
+            case .openai:   return "Standard Whisper API (~$0.006/min). Most reliable."
+            case .deepgram: return "Nova-3 model (~$0.008/min). Excellent real-time performance."
+            case .local:    return ""
+            }
+        case .llm:
+            switch appState.settings.llmProvider {
+            case .groq:    return "Fastest. Reuses your Groq STT key — no extra key needed."
+            case .claude:  return "Claude (Anthropic). Strong at long-form rewrites."
+            case .google:  return "Gemini (Google). Generous free tier."
+            case .openai:  return "OpenAI. GPT-4o-mini by default."
+            case .local:   return ""
+            }
+        }
+    }
+
+    // MARK: API key field
+
+    @ViewBuilder
+    private var keyField: some View {
+        let provider = currentKeychainProvider
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(provider.label)
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Link(provider.dashboardLabel,
+                     destination: URL(string: provider.dashboardURL)!)
+                    .font(.caption2)
+            }
+            SecureField("", text: provider.binding, prompt: Text("sk-…"))
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: provider.binding.wrappedValue) { _, newValue in
+                    // Autosave to Keychain on every keystroke. Empty value
+                    // = user cleared the field; we still write so the
+                    // missing-key banner reflects the intent.
+                    KeychainManager.store(key: provider.keychainKey, value: newValue)
+                }
+            if kind == .llm, appState.settings.llmProvider == .groq {
+                Text("Same key powers the fastest STT — no separate Groq STT key needed.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+        }
+    }
+
+    /// Resolves which key (label + binding + dashboard URL) the inline field
+    /// should render, based on the currently-selected sub-provider. Pulls
+    /// label/URL strings out of the provider enums so this view stays
+    /// label-agnostic when copy changes elsewhere.
+    private var currentKeychainProvider: ResolvedCloudKey {
+        switch kind {
+        case .stt:
+            switch appState.settings.sttProvider {
+            case .groq:
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: STTProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            case .openai:
+                return .init(label: "OpenAI API key",
+                             binding: $openAIKey,
+                             keychainKey: STTProviderType.openai.keychainKey,
+                             dashboardURL: "https://platform.openai.com/api-keys",
+                             dashboardLabel: "Get a key →")
+            case .deepgram:
+                return .init(label: "Deepgram API key",
+                             binding: $deepgramKey,
+                             keychainKey: STTProviderType.deepgram.keychainKey,
+                             dashboardURL: "https://console.deepgram.com",
+                             dashboardLabel: "Get a key →")
+            case .local:
+                // Defensive — local should never render this view.
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: STTProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            }
+        case .llm:
+            switch appState.settings.llmProvider {
+            case .groq:
+                return .init(label: "Groq API key (shared with STT)",
+                             binding: $groqKey,
+                             keychainKey: LLMProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            case .claude:
+                return .init(label: "Anthropic API key",
+                             binding: $anthropicKey,
+                             keychainKey: LLMProviderType.claude.keychainKey,
+                             dashboardURL: "https://console.anthropic.com/settings/keys",
+                             dashboardLabel: "Get a key →")
+            case .google:
+                return .init(label: "Google API key",
+                             binding: $googleKey,
+                             keychainKey: LLMProviderType.google.keychainKey,
+                             dashboardURL: "https://aistudio.google.com/apikey",
+                             dashboardLabel: "Get a key →")
+            case .openai:
+                return .init(label: "OpenAI API key",
+                             binding: $openAIKey,
+                             keychainKey: LLMProviderType.openai.keychainKey,
+                             dashboardURL: "https://platform.openai.com/api-keys",
+                             dashboardLabel: "Get a key →")
+            case .local:
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: LLMProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            }
+        }
+    }
+
+    private struct ResolvedCloudKey {
+        let label: String
+        let binding: Binding<String>
+        let keychainKey: String
+        let dashboardURL: String
+        let dashboardLabel: String
+    }
+
+    // MARK: Advanced disclosure (LLM only)
+
+    @ViewBuilder
+    private var advancedDisclosure: some View {
+        DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Model name")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("", text: modelBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { appState.saveSettings() }
+                Text("Override only if you know the exact model ID you want.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+            .padding(.top, 6)
+        } label: {
+            Text("Advanced — model name")
+                .font(.caption)
+                .foregroundColor(.accentColor)
+        }
+    }
+
+    private var modelBinding: Binding<String> {
+        switch appState.settings.llmProvider {
+        case .groq:   return $appState.settings.groqLLMModel
+        case .claude: return $appState.settings.claudeModel
+        case .google: return $appState.settings.googleModel
+        case .openai: return $appState.settings.openAILLMModel
+        case .local:  return .constant("")  // unreachable
+        }
+    }
+}
+
+/// Local (on-device) branch of the AI Models config (P1-UX-07).
+///
+/// Decision 3: local config is fully inline — no DisclosureGroup. Everything
+/// the user needs to see is at the top level. Layout:
+///   1. Hardware probe badge + Re-check (LLM only — STT runs on any Mac).
+///   2. Status row (downloading / verifying / preparing / ready / failed)
+///      with the right action button on the right (Download / Cancel /
+///      Delete).
+///   3. Quality picker — Whisper: Fast / Balanced / Accurate segmented;
+///      Gemma: 1B selected, 2B/4B disabled placeholders for now.
+///   4. Friendly missing-model warning when the user picked `.local` but
+///      no bytes are on disk (mirrors the orphan helpers' pattern —
+///      reused verbatim until orphan cleanup lands in P1-UX-09 follow-up).
+private struct LocalProviderConfigView: View {
+    @EnvironmentObject var appState: AppState
+    let kind: ProviderKind
+    @Binding var hardwareTier: HardwareProbe.Tier
+    let onRequestDownload: () -> Void
+
+    @ObservedObject private var whisperManager = WhisperModelManager.shared
+    @ObservedObject private var llmManager = LLMModelManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if kind == .llm {
+                hardwareTierBadge
+            }
+            statusRow
+            qualityPicker
+            if shouldShowMissingWarning {
+                missingModelWarning
+            }
+            if kind == .llm {
+                // Honest copy reinforcing Sprint 2F Decision 5a/5b/5c —
+                // local LLM never falls back to cloud silently.
+                Text("Runs fully on your Mac. There's no cloud fallback — to use a cloud model, switch to the Cloud card above.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: Hardware badge (LLM only)
+
+    @ViewBuilder
+    private var hardwareTierBadge: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(hardwareTierEmoji)
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your Mac: \(hardwareTier.displayLabel)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(hardwareTier.latencyExpectationCopy)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Re-check") {
+                hardwareTier = HardwareProbe.evaluate()
+            }
+            .controlSize(.small)
+            .font(.caption2)
+        }
+    }
+
+    private var hardwareTierEmoji: String {
+        switch hardwareTier {
+        case .recommended:   return "🟢"
+        case .eligible:      return "🟡"
+        case .notSupported:  return "🔴"
+        }
+    }
+
+    // MARK: Status row
+
+    @ViewBuilder
+    private var statusRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: statusIconName)
+                .foregroundStyle(statusIconColor)
+                .font(.system(size: 16))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(modelDisplayName)
+                    .font(.system(.caption, design: .monospaced))
+                Text(statusSubline)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            actionButton
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.orange.opacity(0.12))
+                .fill(Color.secondary.opacity(0.06))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5)
+                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 0.5)
         )
     }
 
-    private func loadKeys() {
-        groqKey = KeychainManager.retrieve(key: STTProviderType.groq.keychainKey) ?? ""
-        openAIKey = KeychainManager.retrieve(key: STTProviderType.openai.keychainKey) ?? ""
-        deepgramKey = KeychainManager.retrieve(key: STTProviderType.deepgram.keychainKey) ?? ""
-        anthropicKey = KeychainManager.retrieve(key: LLMProviderType.claude.keychainKey) ?? ""
-        googleKey = KeychainManager.retrieve(key: LLMProviderType.google.keychainKey) ?? ""
+    @ViewBuilder
+    private var actionButton: some View {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:
+                Button("Delete") {
+                    try? whisperManager.deleteModel(appState.settings.localWhisperModel)
+                }
+                .controlSize(.small)
+            case .downloading:
+                Button("Cancel") { whisperManager.cancelDownload() }
+                    .controlSize(.small)
+            case .preparing:
+                ProgressView().controlSize(.small)
+            default:
+                Button("Download") { onRequestDownload() }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:
+                Button("Delete") {
+                    try? llmManager.deleteModel(LocalLLMModelSpec.defaultSpec)
+                }
+                .controlSize(.small)
+            case .downloading, .verifying:
+                Button("Cancel") { llmManager.cancelDownload() }
+                    .controlSize(.small)
+            case .preparing:
+                ProgressView().controlSize(.small)
+            default:
+                Button("Download (\(formatBytes(LocalLLMModelSpec.defaultSpec.expectedSize)))") {
+                    onRequestDownload()
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(!hardwareTier.supportsLocalLLM)
+            }
+        }
     }
 
-    private func saveKeys() {
-        if !groqKey.isEmpty {
-            KeychainManager.store(key: STTProviderType.groq.keychainKey, value: groqKey)
+    private var modelDisplayName: String {
+        switch kind {
+        case .stt: return appState.settings.localWhisperModel
+        case .llm: return LocalLLMModelSpec.defaultSpec.displayName
         }
-        if !openAIKey.isEmpty {
-            KeychainManager.store(key: STTProviderType.openai.keychainKey, value: openAIKey)
-            KeychainManager.store(key: LLMProviderType.openai.keychainKey, value: openAIKey)
+    }
+
+    private var statusIconName: String {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:                  return "checkmark.circle.fill"
+            case .downloading, .preparing: return "arrow.down.circle"
+            case .failed, .absent, .unknown: return "exclamationmark.triangle.fill"
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:                                 return "checkmark.circle.fill"
+            case .downloading, .verifying, .preparing:   return "arrow.down.circle"
+            case .failed:                                return "exclamationmark.octagon.fill"
+            default:                                     return "circle.dashed"
+            }
         }
-        if !deepgramKey.isEmpty {
-            KeychainManager.store(key: STTProviderType.deepgram.keychainKey, value: deepgramKey)
+    }
+
+    private var statusIconColor: Color {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:                       return .green
+            case .failed, .absent, .unknown:   return .orange
+            default:                           return .secondary
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:                                 return .green
+            case .downloading, .verifying, .preparing:   return .blue
+            case .failed:                                return .red
+            default:                                     return .secondary
+            }
         }
-        if !anthropicKey.isEmpty {
-            KeychainManager.store(key: LLMProviderType.claude.keychainKey, value: anthropicKey)
+    }
+
+    private var statusSubline: String {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready(_, let size):
+                let fmt = ByteCountFormatter(); fmt.countStyle = .file
+                let sizeStr = fmt.string(fromByteCount: size)
+                if whisperManager.isPipeReady {
+                    return "Ready · \(sizeStr) on disk"
+                } else {
+                    return "Optimizing for your Mac (one-time, ~10–30 s) · \(sizeStr) on disk"
+                }
+            case .downloading(let p):  return "Downloading \(Int(p * 100))%"
+            case .preparing:           return "Optimizing for your Mac (one-time, ~10–30 s)"
+            case .failed(let msg):     return msg
+            case .absent, .unknown:    return "Not downloaded — dictation will not work"
+            }
+        case .llm:
+            switch llmManager.state {
+            case .unknown:                   return "Status not checked yet."
+            case .absent:                    return "Not downloaded."
+            case .downloading(let p):        return "Downloading… \(Int(p * 100))%"
+            case .verifying:                 return "Verifying integrity (SHA-256)…"
+            case .preparing:                 return "Preparing model…"
+            case .ready(_, let sizeBytes):   return "Ready · \(formatBytes(sizeBytes)) on disk"
+            case .failed(let err):           return err.errorDescription ?? "Setup failed."
+            }
         }
-        if !googleKey.isEmpty {
-            KeychainManager.store(key: LLMProviderType.google.keychainKey, value: googleKey)
+    }
+
+    // MARK: Quality picker
+
+    @ViewBuilder
+    private var qualityPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Quality")
+                .font(.caption).foregroundColor(.secondary)
+            switch kind {
+            case .stt:
+                Picker("", selection: Binding(
+                    get: { appState.settings.localWhisperModel },
+                    set: { newValue in
+                        appState.settings.localWhisperModel = newValue
+                        appState.saveSettings()
+                        whisperManager.refreshState(for: newValue)
+                        TranscriptionService.prewarmLocalWhisperIfReady(model: newValue)
+                    }
+                )) {
+                    ForEach(WhisperModelCatalog.all) { option in
+                        Text(option.displayName).tag(option.variantName)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                    Text(option.subtitle)
+                        .font(.caption2).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            case .llm:
+                // Phase 1 ships Gemma 3 1B only; 2B / 4B placeholders are
+                // disabled so users see the trajectory. Re-enable in a
+                // follow-up sprint when the larger specs land.
+                Picker("", selection: Binding(
+                    get: { appState.settings.localLLMModel },
+                    set: { newValue in
+                        appState.settings.localLLMModel = newValue
+                        appState.saveSettings()
+                    }
+                )) {
+                    Text("Gemma 3 1B — 0.8 GB").tag(LocalLLMModelSpec.defaultSpec.id)
+                    Text("Gemma 2 2B — coming soon").tag("gemma-2-2b-it-q4_k_m")
+                    Text("Gemma 3 4B — coming soon").tag("gemma-3-4b-it-q4_k_m")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .disabled(true)
+                if case .eligible = hardwareTier {
+                    Text("Quality presets (2B / 4B) unlock on 16 GB+ Macs in a future update.")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
         }
+    }
+
+    // MARK: Missing-model warning
+
+    private var shouldShowMissingWarning: Bool {
+        switch kind {
+        case .stt:
+            // Only warn when the user has actually picked Local STT.
+            guard appState.settings.sttProvider.isLocal else { return false }
+            switch whisperManager.state {
+            case .ready, .downloading, .preparing: return false
+            case .absent, .unknown, .failed:       return true
+            }
+        case .llm:
+            guard appState.settings.llmProvider.isLocal else { return false }
+            if case .ready = llmManager.state { return false }
+            if llmManager.state.isBusy { return false }
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private var missingModelWarning: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(warningTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(warningSubtitle)
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
+    }
+
+    private var warningTitle: String {
+        switch kind {
+        case .stt: return "Local dictation won't work until the model is downloaded."
+        case .llm: return "Formal and Custom modes won't work until the AI model is downloaded."
+        }
+    }
+
+    private var warningSubtitle: String {
+        switch kind {
+        case .stt:
+            if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                return "Click Download above. ~\(option.approxSizeMB) MB, one-time."
+            }
+            return "Click Download above."
+        case .llm:
+            return "Default (Literal) mode keeps working — it doesn't use the AI cleanup model. Tap Download above when you're on Wi-Fi."
+        }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useMB, .useGB]
+        f.countStyle = .file
+        return f.string(fromByteCount: bytes)
     }
 }
