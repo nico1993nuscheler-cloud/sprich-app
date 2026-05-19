@@ -2104,6 +2104,133 @@ private struct GeneralSection: View {
     }
 }
 
+// MARK: - AIModelsSection (P1-UX-08 — STT half; P1-UX-09 lands LLM half + sidebar wiring)
+
+/// Load-bearing section of the sidebar IA. Two stacked sub-sections —
+/// Speech recognition + AI cleanup — each rendered as a `ProviderCardPair`
+/// (Cloud / On this Mac) with a context-aware config view below.
+///
+/// Decision 2 in `sprint-3-settings-ux.md`. This commit lands the section
+/// shell + the Speech-recognition half. The AI-cleanup half is stubbed
+/// pending P1-UX-09, after which the sidebar switch in `SettingsView.body`
+/// swaps `sectionPlaceholder(.aiModels)` for this view.
+private struct AIModelsSection: View {
+    @EnvironmentObject var appState: AppState
+
+    @Binding var groqKey: String
+    @Binding var openAIKey: String
+    @Binding var deepgramKey: String
+    @Binding var anthropicKey: String
+    @Binding var googleKey: String
+
+    @Binding var hardwareTier: HardwareProbe.Tier
+    let onRequestWhisperDownload: () -> Void
+    let onRequestLLMDownload: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                SettingsSectionHeader(icon: "brain", title: "AI Models")
+
+                Text("Pick where the AI runs. Cloud is the fastest setup; On this Mac is private and free after the first download.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                speechRecognitionCard
+
+                aiCleanupCard
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    // MARK: Speech recognition (P1-UX-08)
+
+    @ViewBuilder
+    private var speechRecognitionCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Speech recognition")
+                    .font(.system(size: 13, weight: .semibold))
+
+                ProviderCardPair(
+                    isLocalSelected: appState.settings.sttProvider.isLocal,
+                    cloudTitle: "Cloud",
+                    cloudIcon: "cloud",
+                    cloudSubtitle: "Fastest setup · API key required",
+                    cloudDescription: "Audio is sent to the chosen provider for transcription. Best quality, no model download.",
+                    localTitle: "On this Mac",
+                    localIcon: "laptopcomputer",
+                    localSubtitle: "Private · no API key",
+                    localDescription: "Runs on-device with WhisperKit. Slower the very first time (~10–30 s) while macOS compiles the model.",
+                    onSelectCloud: selectCloudSTT,
+                    onSelectLocal: selectLocalSTT
+                )
+
+                Divider().padding(.vertical, 2)
+
+                if appState.settings.sttProvider.isLocal {
+                    LocalProviderConfigView(
+                        kind: .stt,
+                        hardwareTier: $hardwareTier,
+                        onRequestDownload: onRequestWhisperDownload
+                    )
+                    .environmentObject(appState)
+                } else {
+                    CloudProviderConfigView(
+                        kind: .stt,
+                        groqKey: $groqKey,
+                        openAIKey: $openAIKey,
+                        deepgramKey: $deepgramKey,
+                        anthropicKey: $anthropicKey,
+                        googleKey: $googleKey
+                    )
+                    .environmentObject(appState)
+                }
+            }
+        }
+    }
+
+    private func selectCloudSTT() {
+        // Default cloud STT pick is Groq — fastest, cheapest, and the same
+        // key powers Groq LLM cleanup so most users have it already. The
+        // sub-picker inside `CloudProviderConfigView` lets users move from
+        // there to OpenAI or Deepgram.
+        guard appState.settings.sttProvider.isLocal else { return }
+        appState.settings.sttProvider = .groq
+        appState.saveSettings()
+    }
+
+    private func selectLocalSTT() {
+        guard !appState.settings.sttProvider.isLocal else { return }
+        appState.settings.sttProvider = .local
+        appState.saveSettings()
+        // Refresh state so the warning-banner reflects on-disk truth.
+        WhisperModelManager.shared.refreshState(
+            for: appState.settings.localWhisperModel
+        )
+        TranscriptionService.prewarmLocalWhisperIfReady(
+            model: appState.settings.localWhisperModel
+        )
+    }
+
+    // MARK: AI cleanup (P1-UX-09 — placeholder this commit)
+
+    @ViewBuilder
+    private var aiCleanupCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("AI cleanup")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Configuring AI cleanup lands in the next commit (P1-UX-09).")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+    }
+}
+
 // MARK: - AIModelsSection building blocks (P1-UX-07)
 
 /// Distinguishes a Speech-recognition row from an AI-cleanup row. The two
