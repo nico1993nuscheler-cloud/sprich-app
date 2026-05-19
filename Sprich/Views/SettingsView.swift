@@ -2151,9 +2151,42 @@ private struct AIModelsSection: View {
                 speechRecognitionCard
 
                 aiCleanupCard
+
+                languageCard
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    // MARK: Language pin (P1-UX-10)
+
+    /// Optional language hint passed to the STT provider. nil = auto-detect,
+    /// which Whisper handles well for ~98% of cases; pinning is the escape
+    /// hatch when auto-detect picks the wrong tongue mid-sentence (the user
+    /// pain point that drove this row to be first-class).
+    @ViewBuilder
+    private var languageCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Language")
+                    .font(.system(size: 13, weight: .semibold))
+                Picker("", selection: Binding(
+                    get: { appState.settings.preferredLanguage ?? "auto" },
+                    set: { newValue in
+                        appState.settings.preferredLanguage = newValue == "auto" ? nil : newValue
+                        appState.saveSettings()
+                    }
+                )) {
+                    ForEach(AppLanguages.all, id: \.code) { lang in
+                        Text(lang.displayName).tag(lang.code ?? "auto")
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                Text("Pin speech recognition to a specific language, or let the provider detect it.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
         }
     }
 
