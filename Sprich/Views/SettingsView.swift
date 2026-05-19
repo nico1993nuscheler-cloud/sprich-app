@@ -76,9 +76,12 @@ struct SettingsView: View {
             List(SettingsSection.allCases, selection: $selection) { section in
                 NavigationLink(value: section) {
                     Label(section.displayName, systemImage: section.iconName)
+                        // Sprint 3 polish #4 — extra row breathing room so
+                        // labels don't read flush against the sidebar edge.
+                        .padding(.vertical, 2)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 200)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 240)
             .listStyle(.sidebar)
         } detail: {
             // Each section is wired ticket-by-ticket. The shell (this ticket,
@@ -107,7 +110,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(width: 760, height: 620)
+        .frame(width: 820, height: 640)
         .onReceive(NotificationCenter.default.publisher(for: .sprichOpenSettingsSection)) { note in
             if let raw = note.userInfo?["section"] as? String,
                let section = SettingsSection(rawValue: raw) {
@@ -409,18 +412,15 @@ private struct PrivacySection: View {
                 SettingsCard {
                     Text("Network call inventory")
                         .font(.caption).foregroundColor(.secondary)
-                    Text("Every outbound call Sprich makes is documented in plain language. If you find a call we haven't disclosed, email support@sprichapp.com — we'd consider it a bug.")
+                    Text("Every outbound call Sprich makes is documented in plain language. Available on request — we'll publish it on the website before public launch. If you find a call we haven't disclosed, email us and we'll treat it as a bug.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack {
-                        Button("Read the inventory") {
-                            if let url = URL(string: "https://sprichapp.com/network-calls") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }
-                        .controlSize(.small)
+                        Link("Email support@sprichapp.com",
+                             destination: URL(string: "mailto:support@sprichapp.com?subject=Network%20call%20inventory%20request")!)
+                            .font(.caption)
                         Spacer()
                     }
                     .padding(.top, 2)
@@ -504,10 +504,10 @@ private struct AboutSection: View {
                     Text("AI model attributions")
                         .font(.caption).foregroundColor(.secondary)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Speech-to-text uses Whisper (OpenAI), running on-device via WhisperKit.")
+                        Text("Speech-to-text runs on-device with Whisper via WhisperKit when you pick \"On this Mac\". Cloud STT routes to your chosen provider (Groq, OpenAI, or Deepgram) using your own API key.")
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("On-device AI cleanup uses Gemma 3 by Google, running locally via llama.cpp.")
+                        Text("AI cleanup runs on-device with Gemma 3 by Google via llama.cpp when you pick \"On this Mac\". Cloud cleanup routes to your chosen provider (Groq, Claude, Gemini, or OpenAI) using your own API key.")
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                         // Sprint 2F mandatory Gemma attribution string (verbatim).
@@ -517,6 +517,22 @@ private struct AboutSection: View {
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 4)
+                    }
+                }
+
+                SettingsCard {
+                    Text("Legal")
+                        .font(.caption).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Link("Privacy policy",
+                             destination: URL(string: "https://sprichapp.com/privacy")!)
+                            .font(.caption)
+                        Link("Terms of service",
+                             destination: URL(string: "https://sprichapp.com/terms")!)
+                            .font(.caption)
+                        Link("Imprint",
+                             destination: URL(string: "https://sprichapp.com/imprint")!)
+                            .font(.caption)
                     }
                 }
 
@@ -841,6 +857,11 @@ private struct AIModelsSection: View {
     let onRequestWhisperDownload: () -> Void
     let onRequestLLMDownload: () -> Void
 
+    /// Sprint 3 polish #5 — STT/LLM "Configure" disclosures collapsed by
+    /// default. Per-card so toggling one doesn't move the other.
+    @State private var sttConfigExpanded = false
+    @State private var llmConfigExpanded = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -916,25 +937,45 @@ private struct AIModelsSection: View {
                     onSelectLocal: selectLocalSTT
                 )
 
-                Divider().padding(.vertical, 2)
+                // Sprint 3 polish #9 — when cloud is selected but no key
+                // is in Keychain yet, surface the warning at the card level
+                // (above the disclosure) so the user can't miss it.
+                if isSTTKeyMissing {
+                    missingKeyWarning(providerName: appState.settings.sttProvider.displayName,
+                                      expandAction: { sttConfigExpanded = true })
+                }
 
-                if appState.settings.sttProvider.isLocal {
-                    LocalProviderConfigView(
-                        kind: .stt,
-                        hardwareTier: $hardwareTier,
-                        onRequestDownload: onRequestWhisperDownload
-                    )
-                    .environmentObject(appState)
-                } else {
-                    CloudProviderConfigView(
-                        kind: .stt,
-                        groqKey: $groqKey,
-                        openAIKey: $openAIKey,
-                        deepgramKey: $deepgramKey,
-                        anthropicKey: $anthropicKey,
-                        googleKey: $googleKey
-                    )
-                    .environmentObject(appState)
+                // Sprint 3 polish #5 — provider details collapsed by default
+                // so the page reads as two clean choices first. User expands
+                // to paste an API key, swap quality preset, etc.
+                DisclosureGroup(isExpanded: $sttConfigExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if appState.settings.sttProvider.isLocal {
+                            LocalProviderConfigView(
+                                kind: .stt,
+                                hardwareTier: $hardwareTier,
+                                onRequestDownload: onRequestWhisperDownload
+                            )
+                            .environmentObject(appState)
+                        } else {
+                            CloudProviderConfigView(
+                                kind: .stt,
+                                groqKey: $groqKey,
+                                openAIKey: $openAIKey,
+                                deepgramKey: $deepgramKey,
+                                anthropicKey: $anthropicKey,
+                                googleKey: $googleKey
+                            )
+                            .environmentObject(appState)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text(appState.settings.sttProvider.isLocal
+                         ? "Configure on-device speech recognition"
+                         : "Configure cloud provider")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.accentColor)
                 }
             }
         }
@@ -988,25 +1029,42 @@ private struct AIModelsSection: View {
                     onSelectLocal: selectLocalLLM
                 )
 
-                Divider().padding(.vertical, 2)
+                // Sprint 3 polish #9 — same shape as STT card.
+                if isLLMKeyMissing {
+                    missingKeyWarning(providerName: appState.settings.llmProvider.displayName,
+                                      expandAction: { llmConfigExpanded = true })
+                }
 
-                if appState.settings.llmProvider.isLocal {
-                    LocalProviderConfigView(
-                        kind: .llm,
-                        hardwareTier: $hardwareTier,
-                        onRequestDownload: onRequestLLMDownload
-                    )
-                    .environmentObject(appState)
-                } else {
-                    CloudProviderConfigView(
-                        kind: .llm,
-                        groqKey: $groqKey,
-                        openAIKey: $openAIKey,
-                        deepgramKey: $deepgramKey,
-                        anthropicKey: $anthropicKey,
-                        googleKey: $googleKey
-                    )
-                    .environmentObject(appState)
+                // Sprint 3 polish #5 — collapsed by default; matches the
+                // STT card's shape.
+                DisclosureGroup(isExpanded: $llmConfigExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if appState.settings.llmProvider.isLocal {
+                            LocalProviderConfigView(
+                                kind: .llm,
+                                hardwareTier: $hardwareTier,
+                                onRequestDownload: onRequestLLMDownload
+                            )
+                            .environmentObject(appState)
+                        } else {
+                            CloudProviderConfigView(
+                                kind: .llm,
+                                groqKey: $groqKey,
+                                openAIKey: $openAIKey,
+                                deepgramKey: $deepgramKey,
+                                anthropicKey: $anthropicKey,
+                                googleKey: $googleKey
+                            )
+                            .environmentObject(appState)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text(appState.settings.llmProvider.isLocal
+                         ? "Configure on-device AI cleanup"
+                         : "Configure cloud provider")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.accentColor)
                 }
             }
         }
@@ -1032,6 +1090,55 @@ private struct AIModelsSection: View {
         appState.settings.llmProvider = .local
         appState.saveSettings()
         LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.defaultSpec)
+    }
+
+    // MARK: Missing-key warning (Sprint 3 polish #9)
+
+    /// True when the user selected a cloud STT provider but no key for
+    /// that provider is in Keychain yet. Reads the @State key binding
+    /// (kept in sync by CloudProviderConfigView's onChange-to-Keychain
+    /// autosave), so flipping providers or pasting a key re-evaluates
+    /// immediately.
+    private var isSTTKeyMissing: Bool {
+        switch appState.settings.sttProvider {
+        case .local:    return false
+        case .groq:     return groqKey.isEmpty
+        case .openai:   return openAIKey.isEmpty
+        case .deepgram: return deepgramKey.isEmpty
+        }
+    }
+
+    private var isLLMKeyMissing: Bool {
+        switch appState.settings.llmProvider {
+        case .local:  return false
+        case .groq:   return groqKey.isEmpty
+        case .claude: return anthropicKey.isEmpty
+        case .google: return googleKey.isEmpty
+        case .openai: return openAIKey.isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private func missingKeyWarning(providerName: String,
+                                   expandAction: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Missing API key for \(providerName)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Dictation will fail until you add it.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button("Add key", action: expandAction)
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
     }
 }
 
