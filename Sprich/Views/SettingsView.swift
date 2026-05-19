@@ -101,7 +101,18 @@ struct SettingsView: View {
             Group {
                 switch selection {
                 case .account:   AccountSection()
-                case .aiModels:  sectionPlaceholder(.aiModels)
+                case .aiModels:
+                    AIModelsSection(
+                        groqKey: $groqKey,
+                        openAIKey: $openAIKey,
+                        deepgramKey: $deepgramKey,
+                        anthropicKey: $anthropicKey,
+                        googleKey: $googleKey,
+                        hardwareTier: $hardwareTier,
+                        onRequestWhisperDownload: { showModelDownload = true },
+                        onRequestLLMDownload: { showLLMDownload = true }
+                    )
+                    .environmentObject(appState)
                 case .modes:     ModesSection().environmentObject(appState)
                 case .general:   GeneralSection().environmentObject(appState)
                 case .privacy:   PrivacySection()
@@ -2216,18 +2227,75 @@ private struct AIModelsSection: View {
         )
     }
 
-    // MARK: AI cleanup (P1-UX-09 — placeholder this commit)
+    // MARK: AI cleanup (P1-UX-09)
 
     @ViewBuilder
     private var aiCleanupCard: some View {
         SettingsCard {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("AI cleanup")
                     .font(.system(size: 13, weight: .semibold))
-                Text("Configuring AI cleanup lands in the next commit (P1-UX-09).")
+                Text("Used by Formal and Custom modes. Literal mode skips the AI cleanup entirely.")
                     .font(.caption).foregroundColor(.secondary)
+
+                ProviderCardPair(
+                    isLocalSelected: appState.settings.llmProvider.isLocal,
+                    cloudTitle: "Cloud",
+                    cloudIcon: "cloud",
+                    cloudSubtitle: "Fastest setup · API key required",
+                    cloudDescription: "Transcribed text is sent to the chosen provider for cleanup. Best quality, no model download.",
+                    localTitle: "On this Mac",
+                    localIcon: "laptopcomputer",
+                    localSubtitle: "Private · no API key",
+                    localDescription: "Runs on-device with Gemma 3 1B via llama.cpp. ~0.8 GB one-time download. Needs Apple Silicon + 8 GB RAM.",
+                    onSelectCloud: selectCloudLLM,
+                    onSelectLocal: selectLocalLLM
+                )
+
+                Divider().padding(.vertical, 2)
+
+                if appState.settings.llmProvider.isLocal {
+                    LocalProviderConfigView(
+                        kind: .llm,
+                        hardwareTier: $hardwareTier,
+                        onRequestDownload: onRequestLLMDownload
+                    )
+                    .environmentObject(appState)
+                } else {
+                    CloudProviderConfigView(
+                        kind: .llm,
+                        groqKey: $groqKey,
+                        openAIKey: $openAIKey,
+                        deepgramKey: $deepgramKey,
+                        anthropicKey: $anthropicKey,
+                        googleKey: $googleKey
+                    )
+                    .environmentObject(appState)
+                }
             }
         }
+    }
+
+    private func selectCloudLLM() {
+        guard appState.settings.llmProvider.isLocal else { return }
+        // Default cloud LLM pick is Groq — reuses the STT key, so the
+        // most common path is "user already has a Groq key, just flip
+        // the card." Sub-picker in CloudProviderConfigView lets them
+        // move to Claude / Gemini / OpenAI from there.
+        appState.settings.llmProvider = .groq
+        appState.saveSettings()
+    }
+
+    private func selectLocalLLM() {
+        guard !appState.settings.llmProvider.isLocal else { return }
+        // Sprint 2F Decision 7a: still let the user pick Local even on
+        // Eligible hardware — the warning copy + disabled Download
+        // button surfaces the constraint. .notSupported is the only
+        // block, and we don't guard here (the warning + disabled
+        // button do the work).
+        appState.settings.llmProvider = .local
+        appState.saveSettings()
+        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.defaultSpec)
     }
 }
 
