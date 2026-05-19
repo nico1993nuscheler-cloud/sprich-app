@@ -436,12 +436,12 @@ struct OnboardingView: View {
                 isLocalSelected: providerChoice.isLocal,
                 cloudTitle: "Cloud",
                 cloudIcon: "cloud",
-                cloudSubtitle: "Fastest setup · API key required",
-                cloudDescription: "Audio is sent to Groq for transcription. Best quality, no model download.",
+                cloudSubtitle: "API Key required / Fastest response time",
+                cloudDescription: "Audio sent to chosen provider for transcription.",
                 localTitle: "On this Mac",
                 localIcon: "laptopcomputer",
-                localSubtitle: "Private · no API key",
-                localDescription: "Runs on-device with WhisperKit. Slower the very first time (~10–30 s) while macOS optimizes the model.",
+                localSubtitle: "Private / No API Key",
+                localDescription: "Runs fully on-device. Slightly slower.",
                 onSelectCloud: { providerChoice = .groq },
                 onSelectLocal: { providerChoice = .local }
             )
@@ -457,12 +457,12 @@ struct OnboardingView: View {
                 isLocalSelected: llmProviderChoice.isLocal,
                 cloudTitle: "Cloud",
                 cloudIcon: "cloud",
-                cloudSubtitle: "Fastest setup · same Groq key",
-                cloudDescription: "Transcribed text is sent to Groq for cleanup. Best quality, no model download.",
+                cloudSubtitle: "API Key required / Fastest response time",
+                cloudDescription: "Transcribed text is sent to chosen provider for cleanup. No storage required.",
                 localTitle: "On this Mac",
                 localIcon: "laptopcomputer",
-                localSubtitle: "Private · no API key",
-                localDescription: "Runs on-device with Gemma 3 1B via llama.cpp. Apple Silicon + 8 GB RAM.",
+                localSubtitle: "Private / No API Key",
+                localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
                 onSelectCloud: { llmProviderChoice = .groq },
                 onSelectLocal: { llmProviderChoice = .local }
             )
