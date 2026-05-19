@@ -731,9 +731,32 @@ struct OnboardingView: View {
         }
     }
 
+    /// Persist the user's card-3 picks when they advance to card 4.
+    /// Sprint 3 P1-UX-19 — both providers commit here. The On-Mac LLM
+    /// branch is honored regardless of whether the user clicked
+    /// "Download now" inside the local-LLM subsection: the provider
+    /// flips to `.local` and the first Formal/Custom dictation re-prompts
+    /// to download (Sprint 2F Decision 8 Option C, wired in
+    /// PipelineCoordinator's local-LLM-not-ready path).
+    ///
+    /// Note: `AppSettings.defaults.llmProvider` stays `.groq` — the
+    /// factory default is the safety net for users who skip onboarding
+    /// entirely (closing the window before reaching card 3) and for
+    /// fresh-install hardware-not-supported users. Flipping the static
+    /// default to `.local` would break both paths.
     private func commitProviderChoice() {
+        // STT provider + Whisper warmup.
         appState.settings.sttProvider = providerChoice
+
+        // LLM provider — flip to `.local` when the user picked On-Mac
+        // for AI cleanup, regardless of whether they triggered the
+        // download inside card 3 ("Wait" and "Later" both end up here
+        // with .local persisted and the model bytes still absent;
+        // dictation-time re-prompt picks it up).
+        appState.settings.llmProvider = llmProviderChoice
+
         appState.saveSettings()
+
         switch providerChoice {
         case .local:
             let model = appState.settings.localWhisperModel
