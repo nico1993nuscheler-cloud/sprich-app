@@ -28,6 +28,7 @@
 		A10000051 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000050 /* LocalLLMService.swift */; };
 		A10000060 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000060 /* ProviderCard.swift */; };
 		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
+		A10000062 /* StbImageStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000062 /* StbImageStubs.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
 		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022 /* TextPostProcessor.swift */; };
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023 /* ShortcutHelpView.swift */; };
@@ -112,6 +113,7 @@
 		B10000050 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
 		B10000060 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ProviderCard.swift; sourceTree = "<group>"; };
 		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
+		B10000062 /* StbImageStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StbImageStubs.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -168,6 +170,7 @@
 				B10000030 /* NetworkReachability.swift */,
 				B10000042 /* HardwareProbe.swift */,
 				B10000047 /* NetworkStatusIndicator.swift */,
+				B10000062 /* StbImageStubs.swift */,
 				D10000009 /* ASR */,
 				D10000010 /* Auth */,
 				D10000011 /* Trial */,
@@ -390,6 +393,7 @@
 				A10000051 /* LocalLLMService.swift in Sources */,
 				A10000060 /* ProviderCard.swift in Sources */,
 				A10000061 /* MissingKeyBanner.swift in Sources */,
+				A10000062 /* StbImageStubs.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
