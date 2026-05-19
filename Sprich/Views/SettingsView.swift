@@ -2103,3 +2103,615 @@ private struct GeneralSection: View {
         }
     }
 }
+
+// MARK: - AIModelsSection building blocks (P1-UX-07)
+
+/// Distinguishes a Speech-recognition row from an AI-cleanup row. The two
+/// halves of `AIModelsSection` share the same Cloud/Local config view shape;
+/// `ProviderKind` flips wording, picker contents, and (for local) whether
+/// the HardwareProbe badge appears (LLM-only — STT runs anywhere).
+private enum ProviderKind {
+    case stt
+    case llm
+}
+
+/// Cloud branch of the AI Models config (P1-UX-07).
+///
+/// Decision 3 in `sprint-3-settings-ux.md`: cloud config is *almost* fully
+/// visible — the only thing tucked away is the model-name string, which
+/// 95% of users don't touch. Layout:
+///   1. Cloud sub-provider segmented picker (Groq / OpenAI / Deepgram for
+///      STT; Groq / Claude / Gemini / OpenAI for LLM).
+///   2. Inline API-key SecureField for the currently-selected sub-provider.
+///      Edits write straight to Keychain on field commit — no Save button.
+///   3. "Advanced — model name" `DisclosureGroup` (LLM only) for the
+///      model-string field. STT model strings are baked into each provider,
+///      so the disclosure isn't shown for `.stt`.
+private struct CloudProviderConfigView: View {
+    @EnvironmentObject var appState: AppState
+    let kind: ProviderKind
+
+    @Binding var groqKey: String
+    @Binding var openAIKey: String
+    @Binding var deepgramKey: String
+    @Binding var anthropicKey: String
+    @Binding var googleKey: String
+
+    @State private var showAdvanced = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            subProviderPicker
+            keyField
+            if kind == .llm {
+                advancedDisclosure
+            }
+        }
+    }
+
+    // MARK: Sub-picker
+
+    @ViewBuilder
+    private var subProviderPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(kind == .stt ? "Cloud provider" : "Cloud provider")
+                .font(.caption).foregroundColor(.secondary)
+            switch kind {
+            case .stt:
+                Picker("", selection: sttCloudBinding) {
+                    Text("Groq").tag(STTProviderType.groq)
+                    Text("OpenAI").tag(STTProviderType.openai)
+                    Text("Deepgram").tag(STTProviderType.deepgram)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            case .llm:
+                Picker("", selection: llmCloudBinding) {
+                    Text("Groq").tag(LLMProviderType.groq)
+                    Text("Claude").tag(LLMProviderType.claude)
+                    Text("Gemini").tag(LLMProviderType.google)
+                    Text("OpenAI").tag(LLMProviderType.openai)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+            Text(currentProviderBlurb)
+                .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Bound to `appState.settings.sttProvider` but guarded against writes of
+    /// `.local` (the local branch is shown by `LocalProviderConfigView`, not
+    /// this view, so the segmented picker's tag set is cloud-only). If the
+    /// upstream value is somehow `.local` when this view is on screen, fall
+    /// back to `.groq` for display so the picker doesn't crash.
+    private var sttCloudBinding: Binding<STTProviderType> {
+        Binding(
+            get: {
+                let p = appState.settings.sttProvider
+                return p.isLocal ? .groq : p
+            },
+            set: { newValue in
+                appState.settings.sttProvider = newValue
+                appState.saveSettings()
+            }
+        )
+    }
+
+    private var llmCloudBinding: Binding<LLMProviderType> {
+        Binding(
+            get: {
+                let p = appState.settings.llmProvider
+                return p.isLocal ? .groq : p
+            },
+            set: { newValue in
+                appState.settings.llmProvider = newValue
+                appState.saveSettings()
+            }
+        )
+    }
+
+    private var currentProviderBlurb: String {
+        switch kind {
+        case .stt:
+            switch appState.settings.sttProvider {
+            case .groq:     return "Fastest & cheapest (~$0.0007/min). Whisper large-v3 via Groq cloud."
+            case .openai:   return "Standard Whisper API (~$0.006/min). Most reliable."
+            case .deepgram: return "Nova-3 model (~$0.008/min). Excellent real-time performance."
+            case .local:    return ""
+            }
+        case .llm:
+            switch appState.settings.llmProvider {
+            case .groq:    return "Fastest. Reuses your Groq STT key — no extra key needed."
+            case .claude:  return "Claude (Anthropic). Strong at long-form rewrites."
+            case .google:  return "Gemini (Google). Generous free tier."
+            case .openai:  return "OpenAI. GPT-4o-mini by default."
+            case .local:   return ""
+            }
+        }
+    }
+
+    // MARK: API key field
+
+    @ViewBuilder
+    private var keyField: some View {
+        let provider = currentKeychainProvider
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(provider.label)
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Link(provider.dashboardLabel,
+                     destination: URL(string: provider.dashboardURL)!)
+                    .font(.caption2)
+            }
+            SecureField("", text: provider.binding, prompt: Text("sk-…"))
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: provider.binding.wrappedValue) { _, newValue in
+                    // Autosave to Keychain on every keystroke. Empty value
+                    // = user cleared the field; we still write so the
+                    // missing-key banner reflects the intent.
+                    KeychainManager.store(key: provider.keychainKey, value: newValue)
+                }
+            if kind == .llm, appState.settings.llmProvider == .groq {
+                Text("Same key powers the fastest STT — no separate Groq STT key needed.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+        }
+    }
+
+    /// Resolves which key (label + binding + dashboard URL) the inline field
+    /// should render, based on the currently-selected sub-provider. Pulls
+    /// label/URL strings out of the provider enums so this view stays
+    /// label-agnostic when copy changes elsewhere.
+    private var currentKeychainProvider: ResolvedCloudKey {
+        switch kind {
+        case .stt:
+            switch appState.settings.sttProvider {
+            case .groq:
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: STTProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            case .openai:
+                return .init(label: "OpenAI API key",
+                             binding: $openAIKey,
+                             keychainKey: STTProviderType.openai.keychainKey,
+                             dashboardURL: "https://platform.openai.com/api-keys",
+                             dashboardLabel: "Get a key →")
+            case .deepgram:
+                return .init(label: "Deepgram API key",
+                             binding: $deepgramKey,
+                             keychainKey: STTProviderType.deepgram.keychainKey,
+                             dashboardURL: "https://console.deepgram.com",
+                             dashboardLabel: "Get a key →")
+            case .local:
+                // Defensive — local should never render this view.
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: STTProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            }
+        case .llm:
+            switch appState.settings.llmProvider {
+            case .groq:
+                return .init(label: "Groq API key (shared with STT)",
+                             binding: $groqKey,
+                             keychainKey: LLMProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            case .claude:
+                return .init(label: "Anthropic API key",
+                             binding: $anthropicKey,
+                             keychainKey: LLMProviderType.claude.keychainKey,
+                             dashboardURL: "https://console.anthropic.com/settings/keys",
+                             dashboardLabel: "Get a key →")
+            case .google:
+                return .init(label: "Google API key",
+                             binding: $googleKey,
+                             keychainKey: LLMProviderType.google.keychainKey,
+                             dashboardURL: "https://aistudio.google.com/apikey",
+                             dashboardLabel: "Get a key →")
+            case .openai:
+                return .init(label: "OpenAI API key",
+                             binding: $openAIKey,
+                             keychainKey: LLMProviderType.openai.keychainKey,
+                             dashboardURL: "https://platform.openai.com/api-keys",
+                             dashboardLabel: "Get a key →")
+            case .local:
+                return .init(label: "Groq API key",
+                             binding: $groqKey,
+                             keychainKey: LLMProviderType.groq.keychainKey,
+                             dashboardURL: "https://console.groq.com/keys",
+                             dashboardLabel: "Get a key →")
+            }
+        }
+    }
+
+    private struct ResolvedCloudKey {
+        let label: String
+        let binding: Binding<String>
+        let keychainKey: String
+        let dashboardURL: String
+        let dashboardLabel: String
+    }
+
+    // MARK: Advanced disclosure (LLM only)
+
+    @ViewBuilder
+    private var advancedDisclosure: some View {
+        DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Model name")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("", text: modelBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { appState.saveSettings() }
+                Text("Override only if you know the exact model ID you want.")
+                    .font(.caption2).foregroundColor(.secondary)
+            }
+            .padding(.top, 6)
+        } label: {
+            Text("Advanced — model name")
+                .font(.caption)
+                .foregroundColor(.accentColor)
+        }
+    }
+
+    private var modelBinding: Binding<String> {
+        switch appState.settings.llmProvider {
+        case .groq:   return $appState.settings.groqLLMModel
+        case .claude: return $appState.settings.claudeModel
+        case .google: return $appState.settings.googleModel
+        case .openai: return $appState.settings.openAILLMModel
+        case .local:  return .constant("")  // unreachable
+        }
+    }
+}
+
+/// Local (on-device) branch of the AI Models config (P1-UX-07).
+///
+/// Decision 3: local config is fully inline — no DisclosureGroup. Everything
+/// the user needs to see is at the top level. Layout:
+///   1. Hardware probe badge + Re-check (LLM only — STT runs on any Mac).
+///   2. Status row (downloading / verifying / preparing / ready / failed)
+///      with the right action button on the right (Download / Cancel /
+///      Delete).
+///   3. Quality picker — Whisper: Fast / Balanced / Accurate segmented;
+///      Gemma: 1B selected, 2B/4B disabled placeholders for now.
+///   4. Friendly missing-model warning when the user picked `.local` but
+///      no bytes are on disk (mirrors the orphan helpers' pattern —
+///      reused verbatim until orphan cleanup lands in P1-UX-09 follow-up).
+private struct LocalProviderConfigView: View {
+    @EnvironmentObject var appState: AppState
+    let kind: ProviderKind
+    @Binding var hardwareTier: HardwareProbe.Tier
+    let onRequestDownload: () -> Void
+
+    @ObservedObject private var whisperManager = WhisperModelManager.shared
+    @ObservedObject private var llmManager = LLMModelManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if kind == .llm {
+                hardwareTierBadge
+            }
+            statusRow
+            qualityPicker
+            if shouldShowMissingWarning {
+                missingModelWarning
+            }
+            if kind == .llm {
+                // Honest copy reinforcing Sprint 2F Decision 5a/5b/5c —
+                // local LLM never falls back to cloud silently.
+                Text("Runs fully on your Mac. There's no cloud fallback — to use a cloud model, switch to the Cloud card above.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: Hardware badge (LLM only)
+
+    @ViewBuilder
+    private var hardwareTierBadge: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(hardwareTierEmoji)
+                .font(.system(size: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your Mac: \(hardwareTier.displayLabel)")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(hardwareTier.latencyExpectationCopy)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Re-check") {
+                hardwareTier = HardwareProbe.evaluate()
+            }
+            .controlSize(.small)
+            .font(.caption2)
+        }
+    }
+
+    private var hardwareTierEmoji: String {
+        switch hardwareTier {
+        case .recommended:   return "🟢"
+        case .eligible:      return "🟡"
+        case .notSupported:  return "🔴"
+        }
+    }
+
+    // MARK: Status row
+
+    @ViewBuilder
+    private var statusRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: statusIconName)
+                .foregroundStyle(statusIconColor)
+                .font(.system(size: 16))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(modelDisplayName)
+                    .font(.system(.caption, design: .monospaced))
+                Text(statusSubline)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            actionButton
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 0.5)
+        )
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:
+                Button("Delete") {
+                    try? whisperManager.deleteModel(appState.settings.localWhisperModel)
+                }
+                .controlSize(.small)
+            case .downloading:
+                Button("Cancel") { whisperManager.cancelDownload() }
+                    .controlSize(.small)
+            case .preparing:
+                ProgressView().controlSize(.small)
+            default:
+                Button("Download") { onRequestDownload() }
+                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:
+                Button("Delete") {
+                    try? llmManager.deleteModel(LocalLLMModelSpec.defaultSpec)
+                }
+                .controlSize(.small)
+            case .downloading, .verifying:
+                Button("Cancel") { llmManager.cancelDownload() }
+                    .controlSize(.small)
+            case .preparing:
+                ProgressView().controlSize(.small)
+            default:
+                Button("Download (\(formatBytes(LocalLLMModelSpec.defaultSpec.expectedSize)))") {
+                    onRequestDownload()
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(!hardwareTier.supportsLocalLLM)
+            }
+        }
+    }
+
+    private var modelDisplayName: String {
+        switch kind {
+        case .stt: return appState.settings.localWhisperModel
+        case .llm: return LocalLLMModelSpec.defaultSpec.displayName
+        }
+    }
+
+    private var statusIconName: String {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:                  return "checkmark.circle.fill"
+            case .downloading, .preparing: return "arrow.down.circle"
+            case .failed, .absent, .unknown: return "exclamationmark.triangle.fill"
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:                                 return "checkmark.circle.fill"
+            case .downloading, .verifying, .preparing:   return "arrow.down.circle"
+            case .failed:                                return "exclamationmark.octagon.fill"
+            default:                                     return "circle.dashed"
+            }
+        }
+    }
+
+    private var statusIconColor: Color {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready:                       return .green
+            case .failed, .absent, .unknown:   return .orange
+            default:                           return .secondary
+            }
+        case .llm:
+            switch llmManager.state {
+            case .ready:                                 return .green
+            case .downloading, .verifying, .preparing:   return .blue
+            case .failed:                                return .red
+            default:                                     return .secondary
+            }
+        }
+    }
+
+    private var statusSubline: String {
+        switch kind {
+        case .stt:
+            switch whisperManager.state {
+            case .ready(_, let size):
+                let fmt = ByteCountFormatter(); fmt.countStyle = .file
+                let sizeStr = fmt.string(fromByteCount: size)
+                if whisperManager.isPipeReady {
+                    return "Ready · \(sizeStr) on disk"
+                } else {
+                    return "Optimizing for your Mac (one-time, ~10–30 s) · \(sizeStr) on disk"
+                }
+            case .downloading(let p):  return "Downloading \(Int(p * 100))%"
+            case .preparing:           return "Optimizing for your Mac (one-time, ~10–30 s)"
+            case .failed(let msg):     return msg
+            case .absent, .unknown:    return "Not downloaded — dictation will not work"
+            }
+        case .llm:
+            switch llmManager.state {
+            case .unknown:                   return "Status not checked yet."
+            case .absent:                    return "Not downloaded."
+            case .downloading(let p):        return "Downloading… \(Int(p * 100))%"
+            case .verifying:                 return "Verifying integrity (SHA-256)…"
+            case .preparing:                 return "Preparing model…"
+            case .ready(_, let sizeBytes):   return "Ready · \(formatBytes(sizeBytes)) on disk"
+            case .failed(let err):           return err.errorDescription ?? "Setup failed."
+            }
+        }
+    }
+
+    // MARK: Quality picker
+
+    @ViewBuilder
+    private var qualityPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Quality")
+                .font(.caption).foregroundColor(.secondary)
+            switch kind {
+            case .stt:
+                Picker("", selection: Binding(
+                    get: { appState.settings.localWhisperModel },
+                    set: { newValue in
+                        appState.settings.localWhisperModel = newValue
+                        appState.saveSettings()
+                        whisperManager.refreshState(for: newValue)
+                        TranscriptionService.prewarmLocalWhisperIfReady(model: newValue)
+                    }
+                )) {
+                    ForEach(WhisperModelCatalog.all) { option in
+                        Text(option.displayName).tag(option.variantName)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                    Text(option.subtitle)
+                        .font(.caption2).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            case .llm:
+                // Phase 1 ships Gemma 3 1B only; 2B / 4B placeholders are
+                // disabled so users see the trajectory. Re-enable in a
+                // follow-up sprint when the larger specs land.
+                Picker("", selection: Binding(
+                    get: { appState.settings.localLLMModel },
+                    set: { newValue in
+                        appState.settings.localLLMModel = newValue
+                        appState.saveSettings()
+                    }
+                )) {
+                    Text("Gemma 3 1B — 0.8 GB").tag(LocalLLMModelSpec.defaultSpec.id)
+                    Text("Gemma 2 2B — coming soon").tag("gemma-2-2b-it-q4_k_m")
+                    Text("Gemma 3 4B — coming soon").tag("gemma-3-4b-it-q4_k_m")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .disabled(true)
+                if case .eligible = hardwareTier {
+                    Text("Quality presets (2B / 4B) unlock on 16 GB+ Macs in a future update.")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: Missing-model warning
+
+    private var shouldShowMissingWarning: Bool {
+        switch kind {
+        case .stt:
+            // Only warn when the user has actually picked Local STT.
+            guard appState.settings.sttProvider.isLocal else { return false }
+            switch whisperManager.state {
+            case .ready, .downloading, .preparing: return false
+            case .absent, .unknown, .failed:       return true
+            }
+        case .llm:
+            guard appState.settings.llmProvider.isLocal else { return false }
+            if case .ready = llmManager.state { return false }
+            if llmManager.state.isBusy { return false }
+            return true
+        }
+    }
+
+    @ViewBuilder
+    private var missingModelWarning: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(warningTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(warningSubtitle)
+                    .font(.caption).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange.opacity(0.4), lineWidth: 0.5))
+    }
+
+    private var warningTitle: String {
+        switch kind {
+        case .stt: return "Local dictation won't work until the model is downloaded."
+        case .llm: return "Formal and Custom modes won't work until the AI model is downloaded."
+        }
+    }
+
+    private var warningSubtitle: String {
+        switch kind {
+        case .stt:
+            if let option = WhisperModelCatalog.option(for: appState.settings.localWhisperModel) {
+                return "Click Download above. ~\(option.approxSizeMB) MB, one-time."
+            }
+            return "Click Download above."
+        case .llm:
+            return "Default (Literal) mode keeps working — it doesn't use the AI cleanup model. Tap Download above when you're on Wi-Fi."
+        }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useMB, .useGB]
+        f.countStyle = .file
+        return f.string(fromByteCount: bytes)
+    }
+}
