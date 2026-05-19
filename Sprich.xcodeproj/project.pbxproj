@@ -25,7 +25,6 @@
 		A10000016 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000016 /* OnboardingView.swift */; };
 		A10000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Assets.xcassets */; };
 		A10000047 /* NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = B10000048 /* NOTICE.txt */; };
-		A10000048 /* LocalLLMOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000049 /* LocalLLMOnboardingView.swift */; };
 		A10000051 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000050 /* LocalLLMService.swift */; };
 		A10000060 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000060 /* ProviderCard.swift */; };
 		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
@@ -110,7 +109,6 @@
 		B10000046 /* LLMModelDownloadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMModelDownloadView.swift; sourceTree = "<group>"; };
 		B10000047 /* NetworkStatusIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatusIndicator.swift; sourceTree = "<group>"; };
 		B10000048 /* NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NOTICE.txt; sourceTree = "<group>"; };
-		B10000049 /* LocalLLMOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMOnboardingView.swift; sourceTree = "<group>"; };
 		B10000050 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
 		B10000060 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ProviderCard.swift; sourceTree = "<group>"; };
 		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
@@ -237,7 +235,6 @@
 				B10000021 /* RecordingOverlay.swift */,
 				B10000029 /* ModelDownloadView.swift */,
 				B10000046 /* LLMModelDownloadView.swift */,
-				B10000049 /* LocalLLMOnboardingView.swift */,
 				B10000037 /* SignInView.swift */,
 				B10000039 /* SignInPanel.swift */,
 				B10000038 /* TrialLockView.swift */,
@@ -390,7 +387,6 @@
 				A10000044 /* LLMModelManager.swift in Sources */,
 				A10000045 /* LLMModelDownloadView.swift in Sources */,
 				A10000046 /* NetworkStatusIndicator.swift in Sources */,
-				A10000048 /* LocalLLMOnboardingView.swift in Sources */,
 				A10000051 /* LocalLLMService.swift in Sources */,
 				A10000060 /* ProviderCard.swift in Sources */,
 				A10000061 /* MissingKeyBanner.swift in Sources */,

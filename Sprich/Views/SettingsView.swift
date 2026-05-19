@@ -66,7 +66,6 @@ struct SettingsView: View {
 
     // Local LLM (Sprint 2F)
     @State private var showLLMDownload = false
-    @State private var showLLMOnboarding = false
     @ObservedObject private var llmManager = LLMModelManager.shared
     /// Cached HardwareProbe result. Probed `.onAppear`, re-probed when the
     /// user taps "Re-check" (so a post-RAM-upgrade user can flip from 🟡 to 🟢).
@@ -163,11 +162,6 @@ struct SettingsView: View {
                     }
                 }
             )
-        }
-        .sheet(isPresented: $showLLMOnboarding) {
-            LocalLLMOnboardingView(onClose: {
-                showLLMOnboarding = false
-            })
         }
     }
 

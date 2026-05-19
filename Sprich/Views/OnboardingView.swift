@@ -21,6 +21,15 @@ struct OnboardingView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var trial = TrialState.shared
     @ObservedObject private var whisperManager = WhisperModelManager.shared
+    /// Local LLM manager — used by the On-Mac AI cleanup subsections
+    /// (P1-UX-18) so card 3 can show eligibility + start a download
+    /// without leaving the onboarding window.
+    @ObservedObject private var llmManager = LLMModelManager.shared
+    /// HardwareProbe result for the LLM eligibility badge (P1-UX-18).
+    /// Probed once on appear; re-checking is a less common need during
+    /// onboarding than in Settings, so we don't surface a Re-check button
+    /// here.
+    @State private var hardwareTier: HardwareProbe.Tier = HardwareProbe.evaluate()
 
     @State private var currentStep = 0
 
@@ -411,6 +420,10 @@ struct OnboardingView: View {
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
             }
+            // Refresh local LLM state so the inline P1-UX-18 subsections
+            // reflect on-disk truth (e.g. user downloaded earlier and the
+            // status badge should already say "Ready").
+            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
         }
     }
 
@@ -456,26 +469,157 @@ struct OnboardingView: View {
         }
     }
 
-    /// Placeholder copy for the on-Mac LLM branch during onboarding.
-    /// P1-UX-18 replaces this with the eligibility / storage / timing
-    /// flow absorbed from LocalLLMOnboardingView.
+    /// On-Mac AI cleanup subsections (P1-UX-18). Replaces the standalone
+    /// LocalLLMOnboardingView sheet: eligibility badge, storage breakdown,
+    /// and a download-or-defer affordance — all inline inside card 3.
     @ViewBuilder
     private var localLLMNoteInOnboarding: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(.blue)
+        VStack(alignment: .leading, spacing: 12) {
+            hardwareEligibilityRow
+
+            if hardwareTier.supportsLocalLLM {
+                storageBreakdown
+                downloadOrDeferRow
+            } else {
+                steerToCloudCopy
+            }
+        }
+    }
+
+    /// 🟢 / 🟡 / 🔴 hardware tier badge — same probe Settings uses.
+    @ViewBuilder
+    private var hardwareEligibilityRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(hardwareTierGlyph)
+                .font(.system(size: 18))
             VStack(alignment: .leading, spacing: 2) {
-                Text("On-Mac AI cleanup needs a one-time ~0.8 GB download.")
+                Text("Your Mac: \(hardwareTier.displayLabel)")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(hardwareTier.latencyExpectationCopy)
                     .font(.caption).foregroundColor(.secondary)
-                Text("You can start the download now from Settings → AI Models, or use Cloud for AI cleanup until then. Default (Literal) mode works either way.")
-                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
+    }
+
+    private var hardwareTierGlyph: String {
+        switch hardwareTier {
+        case .recommended:  return "🟢"
+        case .eligible:     return "🟡"
+        case .notSupported: return "🔴"
+        }
+    }
+
+    /// Total install footprint disclosure — non-negotiable per the local-
+    /// LLM scoping session ("Disclose total install footprint before any
+    /// download starts").
+    @ViewBuilder
+    private var storageBreakdown: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            storageRow(label: "Whisper (speech-to-text)", size: "~1.5 GB")
+            storageRow(label: "Gemma 3 1B (AI cleanup)", size: "~0.8 GB")
+            Divider().padding(.vertical, 2)
+            storageRow(label: "Total", size: "~2.3 GB", bold: true)
+            Text("Both models live in ~/Library/Application Support/Sprich/ and never leave your Mac.")
+                .font(.caption2).foregroundColor(.secondary)
+                .padding(.top, 2)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.04)))
+    }
+
+    private func storageRow(label: String, size: String, bold: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(bold ? .system(size: 12, weight: .semibold) : .system(size: 12))
+            Spacer()
+            Text(size)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(bold ? .primary : .secondary)
+        }
+    }
+
+    /// "Download now" button + live status, or a defer-to-later note —
+    /// covers the Sprint 2F Decision 8 Option C "Wait" / "Later" branches.
+    /// `commitProviderChoice` (P1-UX-19) writes `.local` regardless of
+    /// which timing the user picks; first Formal/Custom dictation re-
+    /// prompts if the model isn't downloaded yet.
+    @ViewBuilder
+    private var downloadOrDeferRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                downloadActionButton
+                Spacer()
+                downloadStatusLabel
+            }
+            Text("You can also download later from Settings → AI Models. Default (Literal) mode works without it.")
+                .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var downloadActionButton: some View {
+        switch llmManager.state {
+        case .ready:
+            Label("AI model ready", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .downloading, .verifying, .preparing:
+            Button("Cancel download") { llmManager.cancelDownload() }
+                .controlSize(.small)
+        default:
+            Button("Download AI model now (~0.8 GB)") {
+                Task { @MainActor in
+                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.defaultSpec)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private var downloadStatusLabel: some View {
+        switch llmManager.state {
+        case .downloading(let p):
+            Text("\(Int(p * 100))%")
+                .font(.caption).foregroundColor(.secondary).monospacedDigit()
+        case .verifying:
+            Text("Verifying…").font(.caption).foregroundColor(.secondary)
+        case .preparing:
+            Text("Preparing…").font(.caption).foregroundColor(.secondary)
+        case .failed(let err):
+            Text(err.errorDescription ?? "Setup failed")
+                .font(.caption).foregroundColor(.orange)
+                .lineLimit(1)
+        default:
+            EmptyView()
+        }
+    }
+
+    /// Hardware tier `.notSupported` — steer to cloud LLM rather than
+    /// dead-ending the user with a "your Mac can't do this" message.
+    @ViewBuilder
+    private var steerToCloudCopy: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill").foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("This Mac isn't a match for on-device AI cleanup.")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Speech-to-text still runs on your Mac — only AI cleanup uses a cloud provider with your own API key. Pick Cloud above to continue.")
+                    .font(.caption).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.blue.opacity(0.25), lineWidth: 0.5))
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.08)))
     }
 
     /// Shared Groq key field — rendered when either provider is set to
