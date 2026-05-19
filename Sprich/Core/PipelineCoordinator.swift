@@ -204,10 +204,16 @@ class PipelineCoordinator {
             // model is on disk, effectiveProviderForThisDictation() already
             // would have flipped us to .local — so reaching here with a
             // missing key means: cloud configured, online, key missing.
-            surfaceBlockingError(
-                title: "STT API key missing for \(provider.displayName)",
-                body: "Open Sprich Settings → AI Models and paste the \(provider.displayName) key, or switch to On this Mac."
-            )
+            //
+            // P1-UX-15: route through MissingKeyBanner (system notification
+            // + deep-link) instead of the inline-paste modal. The hotkey
+            // misfires almost always happen while the user is in another
+            // app — the modal alert kept landing on a UI the user wasn't
+            // looking at.
+            await MainActor.run {
+                MissingKeyBanner.present(providerName: provider.displayName)
+            }
+            appState.status = .ready
             return
         }
 
@@ -476,6 +482,20 @@ class PipelineCoordinator {
 
         } catch {
             RecordingOverlayController.shared.dismiss()
+
+            // P1-UX-15: SprichError.missingAPIKey gets the non-modal
+            // MissingKeyBanner treatment (system notification + deep-link
+            // to AI Models) instead of the inline-paste modal. All other
+            // errors still go through the existing visible-error surface.
+            if let sprichError = error as? SprichError,
+               case let .missingAPIKey(provider) = sprichError {
+                await MainActor.run {
+                    MissingKeyBanner.present(providerName: provider)
+                }
+                appState.status = .ready
+                currentMode = nil
+                return
+            }
 
             let errorMessage: String
             if let sprichError = error as? SprichError {
