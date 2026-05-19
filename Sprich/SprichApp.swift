@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 extension Notification.Name {
     static let sprichOnboardingComplete = Notification.Name("sprich.onboardingComplete")
@@ -56,6 +57,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)
+
+        // Route UN notification taps for the missing-API-key banner
+        // (P1-UX-14) back to the deep-link handler. Set before any
+        // notification posts so the very first one routes correctly.
+        UNUserNotificationCenter.current().delegate = MissingKeyBannerDelegate.shared
 
         // Set up menu bar
         setupMenuBar()

@@ -28,6 +28,7 @@
 		A10000048 /* LocalLLMOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000049 /* LocalLLMOnboardingView.swift */; };
 		A10000051 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000050 /* LocalLLMService.swift */; };
 		A10000060 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000060 /* ProviderCard.swift */; };
+		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
 		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022 /* TextPostProcessor.swift */; };
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023 /* ShortcutHelpView.swift */; };
@@ -112,6 +113,7 @@
 		B10000049 /* LocalLLMOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMOnboardingView.swift; sourceTree = "<group>"; };
 		B10000050 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
 		B10000060 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ProviderCard.swift; sourceTree = "<group>"; };
+		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -242,6 +244,7 @@
 				B10000041 /* UpgradeNagPanel.swift */,
 				B10000040 /* AccountView.swift */,
 				B10000060 /* ProviderCard.swift */,
+				B10000061 /* MissingKeyBanner.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -390,6 +393,7 @@
 				A10000048 /* LocalLLMOnboardingView.swift in Sources */,
 				A10000051 /* LocalLLMService.swift in Sources */,
 				A10000060 /* ProviderCard.swift in Sources */,
+				A10000061 /* MissingKeyBanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
