@@ -27,8 +27,14 @@ struct OnboardingView: View {
     @State private var groqKey = ""
     @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
     @State private var microphoneGranted = Permissions.isMicrophoneGranted()
+    /// STT provider chosen on card 3. `.local` defaults so the
+    /// privacy-first card lights up before the user does anything.
     @State private var providerChoice: STTProviderType = .local
-    @State private var cloudDisclosureExpanded = false
+    /// LLM provider chosen on card 3 (P1-UX-17). Default `.groq` — the
+    /// recommended one-key cloud setup that matches what a first-time
+    /// user is most likely to pick. P1-UX-19 commits this to
+    /// `appState.settings.llmProvider` when the user advances past card 3.
+    @State private var llmProviderChoice: LLMProviderType = .groq
 
     /// Try-it-now state: text captured via PipelineCoordinator.interceptOutput,
     /// plus a one-shot `confettiActive` trigger.
@@ -63,7 +69,7 @@ struct OnboardingView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
             providerChoice = appState.settings.sttProvider
-            cloudDisclosureExpanded = !providerChoice.isLocal
+            llmProviderChoice = appState.settings.llmProvider
         }
         .onDisappear {
             // Catches the red-⊗ dismissal while on step 3 — neither the
@@ -344,75 +350,51 @@ struct OnboardingView: View {
         )
     }
 
-    // MARK: - Step 2 — Provider + Preparing
+    // MARK: - Step 2 — Provider (Speech recognition + AI cleanup)
 
+    /// Sprint 3 P1-UX-17 + P1-UX-18: two stacked `ProviderCardPair` cards
+    /// (Speech recognition + AI cleanup), each surfacing the same Cloud /
+    /// On-this-Mac selector that Settings → AI Models uses. One design
+    /// pattern from first launch through Settings (Decision 2 in
+    /// sprint-3-settings-ux.md).
     private var providerPreparingStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Choose your transcription").font(.title2).fontWeight(.semibold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Pick where the AI runs")
+                    .font(.title2).fontWeight(.semibold)
 
-            Text("Sprich can transcribe fully on your Mac (default) or use a cloud API (recommended for the fastest, most polished output).")
-                .foregroundColor(.secondary)
+                Text("You can change either of these later in Settings → AI Models.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            providerOptionCard(
-                choice: .local,
-                icon: "lock.shield.fill",
-                title: "Local (default)",
-                badge: "No account · No API key · ~\(WhisperModelCatalog.balanced.approxSizeMB) MB one-time download",
-                description: "Runs Whisper on your Mac with Apple Silicon acceleration. Best privacy, zero per-dictation cost."
-            )
+                speechRecognitionPair
 
-            DisclosureGroup(isExpanded: $cloudDisclosureExpanded) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("A cloud key unlocks faster STT and the AI cleanup used in Formal/Custom modes. Groq's free tier is generous.")
-                        .font(.caption).foregroundColor(.secondary)
-
-                    providerOptionCard(
-                        choice: .groq,
-                        icon: "bolt.fill",
-                        title: "Cloud — Groq (recommended)",
-                        badge: "Free tier · powers STT + Formal cleanup",
-                        description: "One key drives both transcription and Formal-mode polish."
-                    )
-
-                    if providerChoice == .groq {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Groq API key").font(.caption).foregroundColor(.secondary)
-                            SecureField("gsk_…", text: $groqKey)
-                                .textFieldStyle(.roundedBorder)
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.up.right.square")
-                                    .foregroundColor(.accentColor)
-                                Link("Get a free Groq key at console.groq.com",
-                                     destination: URL(string: "https://console.groq.com/keys")!)
-                                    .font(.caption)
-                            }
-                        }
-                        .padding(.top, 4)
-                    }
+                if providerChoice == .local {
+                    preparingStrip
                 }
-                .padding(.top, 8)
-            } label: {
-                Text("Cloud — recommended for fastest speed and Formal-mode cleanup")
-                    .font(.system(size: 13, weight: .medium))
-            }
 
-            // Inline preparing-progress strip — shows when Local is the
-            // active provider AND the model isn't already Ready. We
-            // start the download as soon as the user lands on this step
-            // so the bar climbs while they pick options.
-            if providerChoice == .local {
-                preparingStrip
-            }
+                aiCleanupPair
 
-            Spacer()
+                if llmProviderChoice.isLocal {
+                    localLLMNoteInOnboarding
+                }
 
-            navRow(
-                primaryLabel: providerPrimaryLabel,
-                primaryDisabled: providerPrimaryDisabled
-            ) {
-                commitProviderChoice()
-                currentStep = 3
+                if providerChoice == .groq || llmProviderChoice == .groq {
+                    groqKeyField
+                }
+
+                Spacer(minLength: 0)
+
+                navRow(
+                    primaryLabel: providerPrimaryLabel,
+                    primaryDisabled: providerPrimaryDisabled
+                ) {
+                    commitProviderChoice()
+                    currentStep = 3
+                }
             }
+            .padding(.vertical, 2)
         }
         .onChange(of: providerChoice) { choice in
             if choice == .local {
@@ -428,6 +410,89 @@ struct OnboardingView: View {
                 Task { @MainActor in
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var speechRecognitionPair: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Speech recognition")
+                .font(.system(size: 13, weight: .semibold))
+            ProviderCardPair(
+                isLocalSelected: providerChoice.isLocal,
+                cloudTitle: "Cloud",
+                cloudIcon: "cloud",
+                cloudSubtitle: "Fastest setup · API key required",
+                cloudDescription: "Audio is sent to Groq for transcription. Best quality, no model download.",
+                localTitle: "On this Mac",
+                localIcon: "laptopcomputer",
+                localSubtitle: "Private · no API key",
+                localDescription: "Runs on-device with WhisperKit. Slower the very first time (~10–30 s) while macOS optimizes the model.",
+                onSelectCloud: { providerChoice = .groq },
+                onSelectLocal: { providerChoice = .local }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var aiCleanupPair: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("AI cleanup (Formal + Custom modes)")
+                .font(.system(size: 13, weight: .semibold))
+            ProviderCardPair(
+                isLocalSelected: llmProviderChoice.isLocal,
+                cloudTitle: "Cloud",
+                cloudIcon: "cloud",
+                cloudSubtitle: "Fastest setup · same Groq key",
+                cloudDescription: "Transcribed text is sent to Groq for cleanup. Best quality, no model download.",
+                localTitle: "On this Mac",
+                localIcon: "laptopcomputer",
+                localSubtitle: "Private · no API key",
+                localDescription: "Runs on-device with Gemma 3 1B via llama.cpp. Apple Silicon + 8 GB RAM.",
+                onSelectCloud: { llmProviderChoice = .groq },
+                onSelectLocal: { llmProviderChoice = .local }
+            )
+        }
+    }
+
+    /// Placeholder copy for the on-Mac LLM branch during onboarding.
+    /// P1-UX-18 replaces this with the eligibility / storage / timing
+    /// flow absorbed from LocalLLMOnboardingView.
+    @ViewBuilder
+    private var localLLMNoteInOnboarding: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("On-Mac AI cleanup needs a one-time ~0.8 GB download.")
+                    .font(.caption).foregroundColor(.secondary)
+                Text("You can start the download now from Settings → AI Models, or use Cloud for AI cleanup until then. Default (Literal) mode works either way.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.blue.opacity(0.25), lineWidth: 0.5))
+    }
+
+    /// Shared Groq key field — rendered when either provider is set to
+    /// cloud-Groq (the recommended path). Groq's key powers both STT
+    /// and AI cleanup, so collecting it once here covers both choices.
+    @ViewBuilder
+    private var groqKeyField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Groq API key").font(.caption).foregroundColor(.secondary)
+            SecureField("gsk_…", text: $groqKey)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.right.square")
+                    .foregroundColor(.accentColor)
+                Link("Get a free Groq key at console.groq.com",
+                     destination: URL(string: "https://console.groq.com/keys")!)
+                    .font(.caption)
             }
         }
     }
@@ -542,55 +607,6 @@ struct OnboardingView: View {
         default:
             break
         }
-    }
-
-    private func providerOptionCard(
-        choice: STTProviderType,
-        icon: String,
-        title: String,
-        badge: String,
-        description: String
-    ) -> some View {
-        let selected = providerChoice == choice
-        return Button {
-            providerChoice = choice
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 22))
-                    .foregroundColor(selected ? .accentColor : .secondary)
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(title).font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        if selected {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.accentColor)
-                        }
-                    }
-                    Text(badge).font(.caption2).foregroundColor(.secondary)
-                    Text(description).font(.caption).foregroundColor(.secondary)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(selected
-                          ? Color.accentColor.opacity(0.08)
-                          : Color(NSColor.controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        selected ? Color.accentColor.opacity(0.5) : Color.gray.opacity(0.2),
-                        lineWidth: selected ? 1 : 0.5
-                    )
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Step 3 — Try it now
