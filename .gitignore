@@ -4,6 +4,17 @@ DerivedData/
 *.xcuserstate
 *.xcworkspace
 xcuserdata/
+# …but DO track Package.resolved from the embedded project workspace.
+# Pinning it locks the SPM dep graph (esp. tattn/LocalLLMClient — a
+# pre-1.0 single-maintainer repo) so a fresh-clone build resolves
+# to the exact revisions last reviewed + notarised.
+!Sprich.xcodeproj/project.xcworkspace/
+Sprich.xcodeproj/project.xcworkspace/*
+!Sprich.xcodeproj/project.xcworkspace/xcshareddata/
+Sprich.xcodeproj/project.xcworkspace/xcshareddata/*
+!Sprich.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+Sprich.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!Sprich.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # macOS
 .DS_Store

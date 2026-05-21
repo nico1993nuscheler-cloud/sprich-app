@@ -386,6 +386,21 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     private static func clearKeychain() {
+        // Only the session secrets (Supabase JWT + refresh + user metadata)
+        // get wiped on sign-out. User-configured third-party API keys
+        // (`sprich.api.*`) are deliberately preserved — they're local
+        // configuration, not session-scoped data. This matches peers
+        // (Cursor, Raycast, Aider) and means a user who signs out and
+        // back in keeps their Groq/OpenAI/etc. keys intact.
+        //
+        // The threat we're explicitly accepting: on a SHARED macOS user
+        // account with two different Sprich accounts, user B can inherit
+        // user A's provider keys after A signs out. Out-of-scope for v1.0.6
+        // because (a) macOS users have separate Keychains by default —
+        // cross-OS-user inheritance is already prevented; (b) the
+        // same-OS-user/different-Sprich-account scenario is rare on Mac.
+        // If it becomes a real complaint, fix by tagging each provider
+        // key with the setting-user's `user_id` rather than wiping.
         KeychainManager.delete(key: KC.accessToken)
         KeychainManager.delete(key: KC.refreshToken)
         KeychainManager.delete(key: KC.expiresAt)
