@@ -64,6 +64,26 @@ class PipelineCoordinator {
         return .local
     }
 
+    /// LLM mirror of `effectiveProviderForThisDictation()`. Same contract:
+    /// if the user picked a cloud LLM but the device is offline AND the
+    /// local Gemma weights are on disk + verified, use `.local` for this
+    /// dictation only. Settings are NOT mutated — when the network comes
+    /// back the next Formal/Custom dictation goes to the configured
+    /// cloud provider exactly as before.
+    ///
+    /// We gate on `state.isReady` (bytes on disk + SHA verified), not
+    /// `isPipeReady` (llama.cpp context already loaded). A cold-load
+    /// pays a ~1.5 s penalty on the first fallback dictation — that's
+    /// strictly better than hard-failing with "Internet appears to be
+    /// offline" when the user has the local model installed.
+    private func effectiveLLMProviderForThisDictation() -> LLMProviderType {
+        let configured = appState.settings.llmProvider
+        if configured.isLocal { return configured }
+        guard !NetworkReachability.shared.isReachable else { return configured }
+        guard LLMModelManager.shared.state.isReady else { return configured }
+        return .local
+    }
+
     /// Build a state-aware message for when Local is the chosen provider
     /// but the model isn't ready. The three interesting cases produce
     /// different guidance — "still downloading" is nothing the user
@@ -331,11 +351,18 @@ class PipelineCoordinator {
 
         RecordingOverlayController.shared.showTranscribedText(corrected)
         let surface = await surfaceTask?.value ?? .generic
+        let effectiveLLM = effectiveLLMProviderForThisDictation()
+        #if DEBUG
+        if effectiveLLM != appState.settings.llmProvider {
+            print("[Sprich] LLM offline-fallback: configured=\(appState.settings.llmProvider.displayName) → effective=\(effectiveLLM.displayName)")
+        }
+        #endif
         let finalText = try await llmService.cleanup(
             rawText: corrected,
             mode: mode,
             settings: appState.settings,
-            surface: surface
+            surface: surface,
+            providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
         )
         #if DEBUG
         let t2 = CFAbsoluteTimeGetCurrent()
@@ -458,11 +485,18 @@ class PipelineCoordinator {
                 print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(surface.debugLabel)")
                 #endif
 
+                let effectiveLLM = effectiveLLMProviderForThisDictation()
+                #if DEBUG
+                if effectiveLLM != appState.settings.llmProvider {
+                    print("[Sprich] LLM offline-fallback: configured=\(appState.settings.llmProvider.displayName) → effective=\(effectiveLLM.displayName)")
+                }
+                #endif
                 finalText = try await llmService.cleanup(
                     rawText: corrected,
                     mode: mode,
                     settings: appState.settings,
-                    surface: surface
+                    surface: surface,
+                    providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
                 )
                 let t3 = CFAbsoluteTimeGetCurrent()
                 #if DEBUG

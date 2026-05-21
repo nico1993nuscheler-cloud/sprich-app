@@ -61,7 +61,8 @@ class LLMService {
         rawText: String,
         mode: TranscriptionMode,
         settings: AppSettings,
-        surface: Surface = .generic
+        surface: Surface = .generic,
+        providerOverride: LLMProviderType? = nil
     ) async throws -> String {
         let sanitizedText = InputSanitizer.sanitize(rawText)
 
@@ -76,7 +77,12 @@ class LLMService {
             adaptToSurface: settings.adaptToSurface
         )
 
-        switch settings.llmProvider {
+        // `providerOverride` is the offline-fallback escape hatch from
+        // PipelineCoordinator: when set, dispatch on it instead of the
+        // user's configured `settings.llmProvider`. Settings stay
+        // intact so the next dictation honors the user's actual choice.
+        let provider = providerOverride ?? settings.llmProvider
+        switch provider {
         case .groq:
             return try await callGroqLLM(
                 systemPrompt: systemPrompt,
