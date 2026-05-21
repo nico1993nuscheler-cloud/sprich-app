@@ -33,17 +33,37 @@ struct OnboardingView: View {
 
     @State private var currentStep = 0
 
+    /// Cloud-provider API keys. The STT picker exposes Groq / OpenAI /
+    /// Deepgram; the LLM picker adds Claude + Gemini. Some keychain keys
+    /// are shared across providers (e.g. `sprich.api.groq` for both Groq
+    /// STT and Groq LLM, `sprich.api.openai` for both OpenAI STT and
+    /// OpenAI LLM) — `cloudProviderPanel` dedupes the input fields when
+    /// the selected pair share a keychain key.
     @State private var groqKey = ""
+    @State private var openAIKey = ""
+    @State private var deepgramKey = ""
+    @State private var anthropicKey = ""
+    @State private var googleKey = ""
     @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
     @State private var microphoneGranted = Permissions.isMicrophoneGranted()
     /// STT provider chosen on card 3. `.local` defaults so the
     /// privacy-first card lights up before the user does anything.
     @State private var providerChoice: STTProviderType = .local
-    /// LLM provider chosen on card 3 (P1-UX-17). Default `.groq` — the
-    /// recommended one-key cloud setup that matches what a first-time
-    /// user is most likely to pick. P1-UX-19 commits this to
-    /// `appState.settings.llmProvider` when the user advances past card 3.
-    @State private var llmProviderChoice: LLMProviderType = .groq
+    /// LLM provider chosen on card 3. `.local` per the v1.0.6 local-first
+    /// stance — the picker pre-selects "On this Mac" so the Phase 1 wedge
+    /// is the visible recommended path. `.onAppear` still reads
+    /// `appState.settings.llmProvider` afterwards, so a returning user
+    /// with a different saved choice keeps it. Committed to
+    /// `appState.settings.llmProvider` when the user advances past
+    /// the provider card.
+    @State private var llmProviderChoice: LLMProviderType = .local
+
+    /// Controls the "Customize speech & AI cleanup separately" disclosure
+    /// on card 2. Collapsed by default so the unified Local/Cloud picker
+    /// is the only thing competing for attention; auto-opened in
+    /// `.onAppear` if a returning user already has a mixed STT/LLM
+    /// combination saved.
+    @State private var showCustomize: Bool = false
 
     /// Try-it-now state: text captured via PipelineCoordinator.interceptOutput,
     /// plus a one-shot `confettiActive` trigger.
@@ -210,7 +230,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Welcome to Sprich").font(.title).fontWeight(.bold)
 
-            Text("Turn your voice into clean text in any app — emails, chats, docs, code comments. Hold a shortcut, speak, release. Done.")
+            Text("Turn your voice into clean text in any app.")
                 .foregroundColor(.secondary)
 
             if auth.isSignedIn {
@@ -219,12 +239,15 @@ struct OnboardingView: View {
                 SignInPanel(showsHeader: false)
                 // Sprint 2E L2.1 — sign-in is mandatory to advance past
                 // welcome. Without it the user has no trial → "Try it
-                // now" silently fails (audit P0 #1). Reassurance caption
-                // explains why we ask and what we won't do.
-                Text("Sign in is required for your 7-day free trial. We use Supabase EU for auth — no marketing emails.")
+                // now" silently fails (audit P0 #1). Reassurance trimmed
+                // to a single visible line; the EU-auth / no-marketing
+                // detail moved to the `.help(...)` tooltip so it's
+                // available on hover without bulking up the card.
+                Text("Required for your 7-day free trial.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .help("EU-hosted auth via Supabase. No marketing emails.")
             }
 
             Spacer(minLength: 0)
@@ -285,13 +308,18 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Permissions").font(.title2).fontWeight(.semibold)
 
-            Text("Sprich needs two macOS permissions to listen for your shortcut and capture your voice. Audio is sent to your chosen provider only — never written to disk.")
+            // Description trimmed to one short sentence; the privacy
+            // reassurance ("audio never written to disk") moved to the
+            // hover tooltip so it's discoverable without crowding the
+            // card.
+            Text("Sprich needs two macOS permissions.")
                 .font(.callout)
                 .foregroundColor(.secondary)
+                .help("Audio is sent to your chosen provider only — never written to disk.")
 
             permissionRow(
                 title: "Accessibility",
-                explanation: "Lets Sprich listen for your global shortcut and paste transcribed text into the focused app.",
+                explanation: "Required for your global shortcut and to paste into apps.",
                 granted: accessibilityGranted,
                 cta: "Open Accessibility Settings",
                 action: { Permissions.promptAccessibility() }
@@ -299,7 +327,7 @@ struct OnboardingView: View {
 
             permissionRow(
                 title: "Microphone",
-                explanation: "Records audio while you hold the shortcut. Released audio is processed and discarded.",
+                explanation: "Records only while you hold the shortcut.",
                 granted: microphoneGranted,
                 cta: "Grant Microphone Access",
                 action: {
@@ -361,36 +389,55 @@ struct OnboardingView: View {
 
     // MARK: - Step 2 — Provider (Speech recognition + AI cleanup)
 
-    /// Sprint 3 P1-UX-17 + P1-UX-18: two stacked `ProviderCardPair` cards
-    /// (Speech recognition + AI cleanup), each surfacing the same Cloud /
-    /// On-this-Mac selector that Settings → AI Models uses. One design
-    /// pattern from first launch through Settings (Decision 2 in
-    /// sprint-3-settings-ux.md).
+    /// Sprint 3 redesign (Option B from 2026-05-20 UX session):
+    /// the v1.0.6 layout stacked two `ProviderCardPair` selectors plus
+    /// four conditional panels (Whisper preparing strip, hardware
+    /// eligibility, storage breakdown, download CTA) and a Groq key
+    /// field in a 500×600 window — way too much for one screen.
+    ///
+    /// New shape:
+    ///   1. One big unified Local-vs-Cloud picker that flips both
+    ///      providers in lockstep (the choice 95% of users actually
+    ///      want to make).
+    ///   2. A collapsed "Customize speech & AI cleanup separately"
+    ///      disclosure that reveals the original two-`ProviderCardPair`
+    ///      UI for mix-and-match users. Auto-opens if a returning user
+    ///      already has a mixed combination saved.
+    ///   3. ONE consolidated detail panel below — `localModelsPanel`
+    ///      when either provider is local (hardware probe + per-model
+    ///      status rows + download CTA), `groqKeyField` when either is
+    ///      cloud, `steerToCloudCopy` when local LLM was picked on
+    ///      unsupported hardware.
+    ///
+    /// Underlying state (`providerChoice` + `llmProviderChoice`) is
+    /// unchanged so `commitProviderChoice` and the Settings → AI Models
+    /// page keep working without edits.
     private var providerPreparingStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Pick where the AI runs")
+                Text("Pick where Sprich runs")
                     .font(.title2).fontWeight(.semibold)
 
-                Text("You can change either of these later in Settings → AI Models.")
+                Text("Stay on your Mac, or use a cloud provider.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .help("You can change either of these later in Settings → AI Models.")
 
-                speechRecognitionPair
+                unifiedProviderPicker
 
-                if providerChoice == .local {
-                    preparingStrip
+                customizeDisclosure
+
+                if providerChoice == .local || llmProviderChoice.isLocal {
+                    localModelsPanel
                 }
 
-                aiCleanupPair
-
-                if llmProviderChoice.isLocal {
-                    localLLMNoteInOnboarding
+                if llmProviderChoice.isLocal && !hardwareTier.supportsLocalLLM {
+                    steerToCloudCopy
                 }
 
-                if providerChoice == .groq || llmProviderChoice == .groq {
-                    groqKeyField
+                if !providerChoice.isLocal || !llmProviderChoice.isLocal {
+                    cloudProviderPanel
                 }
 
                 Spacer(minLength: 0)
@@ -420,10 +467,124 @@ struct OnboardingView: View {
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
             }
-            // Refresh local LLM state so the inline P1-UX-18 subsections
-            // reflect on-disk truth (e.g. user downloaded earlier and the
-            // status badge should already say "Ready").
+            // Refresh local LLM state so the inline subsections reflect
+            // on-disk truth (e.g. user downloaded earlier — the badge
+            // should already say "Ready").
             llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            // Auto-open the customize disclosure if a returning user has
+            // a mix-and-match combination saved, so they see their
+            // current state instead of a unified picker that doesn't
+            // match either tile.
+            if !isUnifiedSelection {
+                showCustomize = true
+            }
+            // Pre-fill any keys we already have in keychain so a
+            // returning user sees their saved values and `Continue`
+            // doesn't gate them on re-entering what they already
+            // provided. Mirrors the Settings → AI Models `loadKeys()`
+            // flow so the two surfaces stay in sync.
+            groqKey      = KeychainManager.retrieve(key: "sprich.api.groq")      ?? groqKey
+            openAIKey    = KeychainManager.retrieve(key: "sprich.api.openai")    ?? openAIKey
+            deepgramKey  = KeychainManager.retrieve(key: "sprich.api.deepgram")  ?? deepgramKey
+            anthropicKey = KeychainManager.retrieve(key: "sprich.api.anthropic") ?? anthropicKey
+            googleKey    = KeychainManager.retrieve(key: "sprich.api.google")    ?? googleKey
+        }
+    }
+
+    /// True when STT and LLM are both local or both cloud — i.e. one of
+    /// the two big unified-picker tiles can light up. Drives both the
+    /// tile selection state and whether the customize disclosure auto-
+    /// opens on appear.
+    private var isUnifiedSelection: Bool {
+        bothLocalSelected || bothCloudSelected
+    }
+
+    private var bothLocalSelected: Bool {
+        providerChoice == .local && llmProviderChoice == .local
+    }
+
+    /// Cloud tile is selected for ANY non-local combo (Groq+Groq,
+    /// Deepgram+Claude, OpenAI+Gemini, etc.) — not just Groq+Groq. This
+    /// keeps the tile visually selected when the user picks a non-default
+    /// provider pair via the cloud dropdowns.
+    private var bothCloudSelected: Bool {
+        !providerChoice.isLocal && !llmProviderChoice.isLocal
+    }
+
+    /// The new big-picker — a single decision that flips both providers
+    /// in lockstep. Visually selected when both providers match; both
+    /// tiles read as unselected when the user has gone into customize
+    /// and split them, with the "Custom" badge in the disclosure header
+    /// signalling that state.
+    @ViewBuilder
+    private var unifiedProviderPicker: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ProviderCard(
+                icon: "laptopcomputer",
+                title: "On this Mac",
+                subtitle: "Private · Free · No API key",
+                description: "Runs locally. ~2.3 GB download.",
+                isSelected: bothLocalSelected,
+                action: {
+                    providerChoice = .local
+                    llmProviderChoice = .local
+                }
+            )
+            ProviderCard(
+                icon: "cloud",
+                title: "Cloud",
+                subtitle: "Fastest · Bring your API key",
+                description: "One key for speech + AI cleanup.",
+                isSelected: bothCloudSelected,
+                action: {
+                    // Only flip the LOCAL halves to Groq — preserve any
+                    // existing cloud choice (e.g. user already picked
+                    // Deepgram for STT, then clicked the unified tile).
+                    if providerChoice.isLocal { providerChoice = .groq }
+                    if llmProviderChoice.isLocal { llmProviderChoice = .groq }
+                }
+            )
+        }
+    }
+
+    /// Collapsed "Customize speech & AI cleanup separately" section.
+    /// Opens to reveal the two original `ProviderCardPair`s so power
+    /// users can pick e.g. local Whisper + cloud LLM. The Custom badge
+    /// surfaces when state diverges from a unified pick — important
+    /// because both unified tiles read as unselected in that case, and
+    /// the disclosure header is the only thing telling the user where
+    /// their actual selection lives.
+    @ViewBuilder
+    private var customizeDisclosure: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { showCustomize.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: showCustomize ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 10)
+                    Text("Customize speech & AI cleanup separately")
+                        .font(.caption)
+                    if !isUnifiedSelection {
+                        Text("Custom")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                            .foregroundColor(.accentColor)
+                    }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+
+            if showCustomize {
+                speechRecognitionPair
+                aiCleanupPair
+            }
         }
     }
 
@@ -469,41 +630,77 @@ struct OnboardingView: View {
         }
     }
 
-    /// On-Mac AI cleanup subsections (P1-UX-18). Replaces the standalone
-    /// LocalLLMOnboardingView sheet: eligibility badge, storage breakdown,
-    /// and a download-or-defer affordance — all inline inside card 3.
+    /// Consolidated "Local models" panel — replaces the v1.0.6 stack of
+    /// preparingStrip + hardwareEligibilityRow + storageBreakdown +
+    /// downloadOrDeferRow. Renders only the rows that are actually
+    /// required by the user's current STT/LLM choice:
+    ///   - Hardware one-liner only when LLM is local (Whisper has no
+    ///     eligibility gate).
+    ///   - Per-model status row only when that specific model is needed.
+    ///   - Download CTA only when LLM is local AND hardware supports it
+    ///     (otherwise `steerToCloudCopy` handles the dead-end).
+    /// The single panel is visually one block instead of four, which is
+    /// the main density win in the redesign.
     @ViewBuilder
-    private var localLLMNoteInOnboarding: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            hardwareEligibilityRow
-
-            if hardwareTier.supportsLocalLLM {
-                storageBreakdown
-                downloadOrDeferRow
-            } else {
-                steerToCloudCopy
+    private var localModelsPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if llmProviderChoice.isLocal {
+                hardwareOneLiner
             }
+
+            VStack(spacing: 8) {
+                if providerChoice == .local {
+                    modelStatusRow(
+                        label: "Whisper (speech-to-text)",
+                        size: "~1.5 GB",
+                        statusView: AnyView(whisperStatusBadge)
+                    )
+                }
+                if llmProviderChoice.isLocal && hardwareTier.supportsLocalLLM {
+                    modelStatusRow(
+                        label: "Gemma 3 1B (AI cleanup)",
+                        size: "~0.8 GB",
+                        statusView: AnyView(gemmaStatusBadge)
+                    )
+                }
+            }
+
+            if llmProviderChoice.isLocal && hardwareTier.supportsLocalLLM {
+                HStack {
+                    downloadActionButton
+                    Spacer()
+                }
+                .padding(.top, 2)
+            }
+
+            Text("Literal mode works without the AI cleanup model.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .help("Models live in ~/Library/Application Support/Sprich/ and never leave your Mac. You can download AI cleanup later from Settings → AI Models.")
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
     }
 
-    /// 🟢 / 🟡 / 🔴 hardware tier badge — same probe Settings uses.
+    /// Compact one-line hardware verdict — replaces the v1.0.6
+    /// hardwareEligibilityRow box. Same `HardwareProbe` data, just laid
+    /// out as a single line so it doesn't dominate the panel.
     @ViewBuilder
-    private var hardwareEligibilityRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(hardwareTierGlyph)
-                .font(.system(size: 18))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Your Mac: \(hardwareTier.displayLabel)")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(hardwareTier.latencyExpectationCopy)
-                    .font(.caption).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
+    private var hardwareOneLiner: some View {
+        HStack(spacing: 8) {
+            Text(hardwareTierGlyph).font(.system(size: 14))
+            Text("Your Mac: \(hardwareTier.displayLabel)")
+                .font(.system(size: 12, weight: .semibold))
+            Text("·").foregroundColor(.secondary)
+            Text(hardwareTier.latencyExpectationCopy)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
     }
 
     private var hardwareTierGlyph: String {
@@ -514,52 +711,86 @@ struct OnboardingView: View {
         }
     }
 
-    /// Total install footprint disclosure — non-negotiable per the local-
-    /// LLM scoping session ("Disclose total install footprint before any
-    /// download starts").
-    @ViewBuilder
-    private var storageBreakdown: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            storageRow(label: "Whisper (speech-to-text)", size: "~1.5 GB")
-            storageRow(label: "Gemma 3 1B (AI cleanup)", size: "~0.8 GB")
-            Divider().padding(.vertical, 2)
-            storageRow(label: "Total", size: "~2.3 GB", bold: true)
-            Text("Both models live in ~/Library/Application Support/Sprich/ and never leave your Mac.")
-                .font(.caption2).foregroundColor(.secondary)
-                .padding(.top, 2)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.04)))
-    }
-
-    private func storageRow(label: String, size: String, bold: Bool = false) -> some View {
-        HStack {
+    /// One row in `localModelsPanel`. Inline status badge sits on the
+    /// right edge so the user reads "what's needed" → "how big" →
+    /// "where it stands" left-to-right.
+    private func modelStatusRow(label: String, size: String, statusView: AnyView) -> some View {
+        HStack(spacing: 8) {
             Text(label)
-                .font(bold ? .system(size: 12, weight: .semibold) : .system(size: 12))
-            Spacer()
+                .font(.system(size: 12, weight: .medium))
             Text(size)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(bold ? .primary : .secondary)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.secondary)
+            Spacer()
+            statusView
         }
     }
 
-    /// "Download now" button + live status, or a defer-to-later note —
-    /// covers the Sprint 2F Decision 8 Option C "Wait" / "Later" branches.
-    /// `commitProviderChoice` (P1-UX-19) writes `.local` regardless of
-    /// which timing the user picks; first Formal/Custom dictation re-
-    /// prompts if the model isn't downloaded yet.
+    /// Whisper status, condensed into the per-row badge in
+    /// `localModelsPanel`. Mirrors the v1.0.6 `preparingStrip` states but
+    /// stripped to a trailing badge rather than a full-width strip.
     @ViewBuilder
-    private var downloadOrDeferRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                downloadActionButton
-                Spacer()
-                downloadStatusLabel
+    private var whisperStatusBadge: some View {
+        switch whisperManager.state {
+        case .ready:
+            Label("Ready", systemImage: "checkmark.circle.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.green)
+        case .downloading(let p):
+            HStack(spacing: 6) {
+                ProgressView(value: p).progressViewStyle(.linear).frame(width: 70)
+                Text("\(Int(p * 100))%").font(.caption).monospacedDigit().foregroundColor(.secondary)
             }
-            Text("You can also download later from Settings → AI Models. Default (Literal) mode works without it.")
-                .font(.caption2).foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        case .preparing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Optimizing…").font(.caption).foregroundColor(.secondary)
+            }
+        case .failed(let msg):
+            Label(msg, systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.caption)
+                .foregroundColor(.orange)
+                .lineLimit(1)
+        default:
+            Text("Preparing…").font(.caption).foregroundColor(.secondary)
+        }
+    }
+
+    /// Gemma (local LLM) status badge — mirrors `whisperStatusBadge` for
+    /// visual symmetry inside `localModelsPanel`.
+    @ViewBuilder
+    private var gemmaStatusBadge: some View {
+        switch llmManager.state {
+        case .ready:
+            Label("Ready", systemImage: "checkmark.circle.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.green)
+        case .downloading(let p):
+            HStack(spacing: 6) {
+                ProgressView(value: p).progressViewStyle(.linear).frame(width: 70)
+                Text("\(Int(p * 100))%").font(.caption).monospacedDigit().foregroundColor(.secondary)
+            }
+        case .verifying:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Verifying…").font(.caption).foregroundColor(.secondary)
+            }
+        case .preparing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Preparing…").font(.caption).foregroundColor(.secondary)
+            }
+        case .failed(let err):
+            Label(err.errorDescription ?? "Failed", systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.caption)
+                .foregroundColor(.orange)
+                .lineLimit(1)
+        default:
+            Text("Not downloaded").font(.caption).foregroundColor(.secondary)
         }
     }
 
@@ -584,37 +815,30 @@ struct OnboardingView: View {
         }
     }
 
-    @ViewBuilder
-    private var downloadStatusLabel: some View {
-        switch llmManager.state {
-        case .downloading(let p):
-            Text("\(Int(p * 100))%")
-                .font(.caption).foregroundColor(.secondary).monospacedDigit()
-        case .verifying:
-            Text("Verifying…").font(.caption).foregroundColor(.secondary)
-        case .preparing:
-            Text("Preparing…").font(.caption).foregroundColor(.secondary)
-        case .failed(let err):
-            Text(err.errorDescription ?? "Setup failed")
-                .font(.caption).foregroundColor(.orange)
-                .lineLimit(1)
-        default:
-            EmptyView()
-        }
-    }
-
     /// Hardware tier `.notSupported` — steer to cloud LLM rather than
     /// dead-ending the user with a "your Mac can't do this" message.
+    /// The inline action flips ONLY the LLM to cloud, keeping STT on the
+    /// user's Mac. The v1.0.6 copy ("Pick Cloud above") pointed at the
+    /// two-picker UI, but with the unified picker that would flip both
+    /// providers and lose the local-STT intent — so we expose a direct
+    /// button instead and auto-open the customize disclosure so the user
+    /// can see the resulting mixed state.
     @ViewBuilder
     private var steerToCloudCopy: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle.fill").foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("This Mac isn't a match for on-device AI cleanup.")
                     .font(.system(size: 12, weight: .semibold))
-                Text("Speech-to-text still runs on your Mac — only AI cleanup uses a cloud provider with your own API key. Pick Cloud above to continue.")
-                    .font(.caption).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .help("Speech-to-text still runs on your Mac. Only AI cleanup needs a cloud provider with your own API key.")
+                Button("Use cloud for AI cleanup") {
+                    llmProviderChoice = .groq
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showCustomize = true
+                    }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
             }
         }
         .padding(10)
@@ -622,35 +846,283 @@ struct OnboardingView: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.blue.opacity(0.08)))
     }
 
-    /// Shared Groq key field — rendered when either provider is set to
-    /// cloud-Groq (the recommended path). Groq's key powers both STT
-    /// and AI cleanup, so collecting it once here covers both choices.
+    /// Cloud provider sub-picker + API key input(s). Replaces the
+    /// Groq-only key field from v1.0.6, which silently committed every
+    /// "Cloud" user to Groq with no UI hint that OpenAI / Deepgram /
+    /// Claude / Gemini were also options. The panel now:
+    ///   • surfaces a Picker for the STT cloud provider (when STT is
+    ///     cloud) and a Picker for the LLM cloud provider (when LLM is
+    ///     cloud) — both omit `.local`,
+    ///   • renders ONE SecureField per *unique* keychainKey actually
+    ///     needed by the current selection (Groq STT + Groq LLM share
+    ///     `sprich.api.groq` → one field; same for OpenAI STT + OpenAI
+    ///     LLM via `sprich.api.openai`),
+    ///   • shows a per-provider "Get a key at …" link pointing at the
+    ///     API-keys page (not the billing dashboard) so the user can
+    ///     get unblocked in one click.
+    /// Helper line up top names the trade-off ("Groq covers both with
+    /// one key") so the user knows why Groq is pre-selected.
     @ViewBuilder
-    private var groqKeyField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Groq API key").font(.caption).foregroundColor(.secondary)
-            SecureField("gsk_…", text: $groqKey)
+    private var cloudProviderPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pick a provider and paste its API key.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .help("More providers (Deepgram, Claude, Gemini) available later in Settings → AI Models.")
+
+            // When both halves are cloud (the common case), one combined
+            // picker is enough — both STT and LLM flip in lockstep to
+            // the chosen provider. When the user is mixed (e.g. local
+            // STT + cloud LLM via customize), there's nothing to pick
+            // between, so we render no picker at all and let the key
+            // field below speak for the single cloud half.
+            if bothCloudSelected {
+                cloudProviderPicker
+            }
+
+            ForEach(requiredKeychainKeys, id: \.self) { keychainKey in
+                cloudKeyField(for: keychainKey)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+    }
+
+    /// STT cloud-provider options exposed in onboarding. Restricted to
+    /// Groq + OpenAI — both share their keychain key with their LLM
+    /// counterpart, so picking either keeps the panel to a single key
+    /// field. Deepgram is still available post-onboarding in Settings →
+    /// AI Models. Returning users who already saved Deepgram are
+    /// preserved by `sttCloudOptions` rather than silently downgraded.
+    private static let onboardingCloudSTTOptions: [STTProviderType] = [.groq, .openai]
+
+    /// Effective picker contents — base set plus the user's current
+    /// saved choice if it's a non-default cloud provider (e.g. a
+    /// returning user who configured Deepgram in Settings). Without
+    /// this preservation, SwiftUI's Picker would render blank for a
+    /// saved selection that's missing from the menu.
+    private var sttCloudOptions: [STTProviderType] {
+        var options = Self.onboardingCloudSTTOptions
+        if !providerChoice.isLocal && !options.contains(providerChoice) {
+            options.append(providerChoice)
+        }
+        return options
+    }
+
+    /// Combined STT+LLM provider picker. Replaces the two separate
+    /// dropdowns from the earlier design — Groq and OpenAI both share
+    /// their keychain key across STT + LLM, so a single decision covers
+    /// both roles. The custom Binding reads from `providerChoice` (the
+    /// STT side wins ties when state is split) and writes to BOTH
+    /// `providerChoice` and `llmProviderChoice` so a flip unifies any
+    /// split-cloud state from a returning user. Mix-and-match cloud
+    /// (e.g. Groq STT + OpenAI LLM) remains achievable from Settings →
+    /// AI Models — it's an advanced shape, not an onboarding one.
+    @ViewBuilder
+    private var cloudProviderPicker: some View {
+        HStack(spacing: 10) {
+            Text("Cloud provider")
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 140, alignment: .leading)
+            Picker("", selection: unifiedCloudProviderBinding) {
+                ForEach(sttCloudOptions, id: \.self) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            Spacer()
+        }
+    }
+
+    /// Binding for `cloudProviderPicker` — reads `providerChoice` and on
+    /// write mirrors the STT choice into the corresponding LLM choice.
+    /// Only Groq and OpenAI need the mirror; Deepgram falls through to
+    /// leaving the LLM half untouched (Deepgram is STT-only and only
+    /// reaches this picker for a saved returning user, who already has
+    /// some LLM choice we shouldn't clobber).
+    private var unifiedCloudProviderBinding: Binding<STTProviderType> {
+        Binding(
+            get: {
+                // STT wins for the displayed value when state is split.
+                if !providerChoice.isLocal { return providerChoice }
+                // Fall back to inferring from the LLM side so the picker
+                // still shows something sensible if STT happens to be
+                // local while we're rendering (shouldn't happen given
+                // bothCloudSelected gate, but defensive is cheap here).
+                return llmProviderChoice == .openai ? .openai : .groq
+            },
+            set: { newValue in
+                providerChoice = newValue
+                switch newValue {
+                case .groq:   llmProviderChoice = .groq
+                case .openai: llmProviderChoice = .openai
+                default:
+                    // Saved non-default (e.g. Deepgram). Don't touch the
+                    // LLM half — Deepgram has no LLM counterpart and
+                    // the user's existing LLM choice is the better
+                    // default than a forced flip.
+                    break
+                }
+            }
+        )
+    }
+
+    /// Ordered, deduplicated list of keychain keys the current cloud
+    /// selection requires. Order is STT-first then LLM-second so the
+    /// field for the user's earliest-encountered choice renders at the
+    /// top; the dedupe handles Groq+Groq and OpenAI+OpenAI sharing one
+    /// physical key.
+    private var requiredKeychainKeys: [String] {
+        var keys: [String] = []
+        if !providerChoice.isLocal {
+            keys.append(providerChoice.keychainKey)
+        }
+        if !llmProviderChoice.isLocal {
+            let k = llmProviderChoice.keychainKey
+            if !keys.contains(k) { keys.append(k) }
+        }
+        return keys
+    }
+
+    /// One SecureField row inside `cloudProviderPanel`, keyed by the
+    /// underlying keychain key (so shared keys collapse to a single row).
+    @ViewBuilder
+    private func cloudKeyField(for keychainKey: String) -> some View {
+        let spec = cloudKeySpec(for: keychainKey)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(spec.label)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            SecureField(spec.placeholder, text: binding(for: keychainKey))
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.right.square")
                     .foregroundColor(.accentColor)
-                Link("Get a free Groq key at console.groq.com",
-                     destination: URL(string: "https://console.groq.com/keys")!)
+                Link(spec.linkLabel, destination: spec.apiKeysURL)
                     .font(.caption)
             }
         }
     }
 
+    /// Binding into the per-keychain `@State` strings. Centralising the
+    /// switch keeps `cloudKeyField` free of pre-existing-key knowledge.
+    private func binding(for keychainKey: String) -> Binding<String> {
+        switch keychainKey {
+        case "sprich.api.groq":      return $groqKey
+        case "sprich.api.openai":    return $openAIKey
+        case "sprich.api.deepgram":  return $deepgramKey
+        case "sprich.api.anthropic": return $anthropicKey
+        case "sprich.api.google":    return $googleKey
+        default:                     return $groqKey
+        }
+    }
+
+    /// Display metadata for one cloud-provider key field — label,
+    /// placeholder, "where to get a key" URL + caption. Keyed by the
+    /// stable keychain string so STT + LLM rows that share a provider
+    /// (e.g. Groq) trivially share metadata too.
+    private struct CloudKeySpec {
+        let label: String
+        let placeholder: String
+        let apiKeysURL: URL
+        let linkLabel: String
+    }
+
+    private func cloudKeySpec(for keychainKey: String) -> CloudKeySpec {
+        // No "(used for both)" suffix anymore — the single combined
+        // cloud picker upstream already communicates that one provider
+        // handles both roles. Suffix was load-bearing back when STT and
+        // LLM had separate dropdowns; redundant now.
+        switch keychainKey {
+        case "sprich.api.groq":
+            return CloudKeySpec(
+                label: "Groq API key",
+                placeholder: "gsk_…",
+                apiKeysURL: URL(string: "https://console.groq.com/keys")!,
+                linkLabel: "Get a free Groq key at console.groq.com"
+            )
+        case "sprich.api.openai":
+            return CloudKeySpec(
+                label: "OpenAI API key",
+                placeholder: "sk-…",
+                apiKeysURL: URL(string: "https://platform.openai.com/api-keys")!,
+                linkLabel: "Get an OpenAI key at platform.openai.com"
+            )
+        case "sprich.api.deepgram":
+            return CloudKeySpec(
+                label: "Deepgram API key",
+                placeholder: "Deepgram key…",
+                apiKeysURL: URL(string: "https://console.deepgram.com/api-keys")!,
+                linkLabel: "Get a Deepgram key at console.deepgram.com"
+            )
+        case "sprich.api.anthropic":
+            return CloudKeySpec(
+                label: "Anthropic API key",
+                placeholder: "sk-ant-…",
+                apiKeysURL: URL(string: "https://console.anthropic.com/settings/keys")!,
+                linkLabel: "Get an Anthropic key at console.anthropic.com"
+            )
+        case "sprich.api.google":
+            return CloudKeySpec(
+                label: "Google AI API key",
+                placeholder: "AI…",
+                apiKeysURL: URL(string: "https://aistudio.google.com/apikey")!,
+                linkLabel: "Get a Google AI key at aistudio.google.com"
+            )
+        default:
+            return CloudKeySpec(
+                label: "API key",
+                placeholder: "",
+                apiKeysURL: URL(string: "https://console.groq.com/keys")!,
+                linkLabel: "Get a key"
+            )
+        }
+    }
+
+    /// Trimmed value of the @State string backing a given keychain key —
+    /// used by both the gate and the commit path. Centralising it keeps
+    /// the empty-check logic in one place.
+    private func enteredKey(for keychainKey: String) -> String {
+        let raw: String
+        switch keychainKey {
+        case "sprich.api.groq":      raw = groqKey
+        case "sprich.api.openai":    raw = openAIKey
+        case "sprich.api.deepgram":  raw = deepgramKey
+        case "sprich.api.anthropic": raw = anthropicKey
+        case "sprich.api.google":    raw = googleKey
+        default:                     raw = ""
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True if every cloud provider in the current selection has either
+    /// a key already in keychain (returning user) or a freshly-entered
+    /// value in the corresponding @State field.
+    private var allCloudKeysProvided: Bool {
+        for keychainKey in requiredKeychainKeys {
+            let fresh = !enteredKey(for: keychainKey).isEmpty
+            let stored = (KeychainManager.retrieve(key: keychainKey)?.isEmpty == false)
+            if !(fresh || stored) { return false }
+        }
+        return true
+    }
+
     private var providerPrimaryLabel: String {
-        switch providerChoice {
-        case .local:
-            // Sprint 2E L2.2 — Continue is disabled until the pipe is
-            // ready, so the disabled label needs to communicate "we're
-            // working on it" rather than the old "finish in the
-            // background" (which let the user advance into a state
-            // where Try-it-now silently couldn't transcribe).
+        // Local STT gate stays the same shape: until Whisper is ready,
+        // the button reflects the warming state. This applies even when
+        // the LLM half is cloud — the user still can't transcribe yet.
+        if providerChoice.isLocal {
             if whisperManager.isPipeReady {
-                return "Continue — Sprich is ready"
+                // Whisper is ready. If the LLM half needs a cloud key,
+                // we still want the user to fill it before advancing,
+                // but `providerPrimaryDisabled` enforces that — here we
+                // just give the button a sensible label.
+                return llmProviderChoice.isLocal
+                    ? "Continue — Sprich is ready"
+                    : (allCloudKeysProvided ? "Save Key & Continue" : "Continue")
             }
             switch whisperManager.state {
             case .downloading(let p):
@@ -662,73 +1134,22 @@ struct OnboardingView: View {
             default:
                 return "Whisper is finishing setup…"
             }
-        case .groq:
-            return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
-                ? "Continue"
-                : "Save Key & Continue"
-        default:
-            return "Continue"
         }
+        // STT is cloud (any provider). The label hints that we'll save
+        // the key(s) into keychain on advance, but only once at least
+        // one key has been freshly entered — otherwise plain "Continue".
+        let anyFresh = requiredKeychainKeys.contains { !enteredKey(for: $0).isEmpty }
+        return anyFresh ? "Save Key & Continue" : "Continue"
     }
 
     private var providerPrimaryDisabled: Bool {
-        if providerChoice == .groq {
-            return groqKey.trimmingCharacters(in: .whitespaces).isEmpty
+        if providerChoice.isLocal {
+            // Sprint 2E L2.2 — Block advancing until Whisper is fully
+            // ready, otherwise Try-it-now silently no-ops.
+            if !whisperManager.isPipeReady { return true }
         }
-        if providerChoice == .local {
-            // Sprint 2E L2.2 — Block advancing past step 2 until the
-            // local Whisper pipe is fully ready. Without this gate the
-            // user lands on step 3 (Try it now), holds the hotkey, and
-            // gets nothing because WhisperKit is still warming. Audit P0 #6.
-            return !whisperManager.isPipeReady
-        }
-        return false
-    }
-
-    @ViewBuilder
-    private var preparingStrip: some View {
-        switch whisperManager.state {
-        case .ready:
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                Text("Whisper is ready.")
-                    .font(.caption).foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.green.opacity(0.08)))
-        case .downloading(let p):
-            HStack(spacing: 10) {
-                ProgressView(value: p)
-                    .progressViewStyle(.linear)
-                    .frame(maxWidth: 200)
-                Text("Preparing Whisper… \(Int(p * 100))%")
-                    .font(.caption).foregroundColor(.secondary).monospacedDigit()
-                Spacer()
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
-        case .preparing:
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text("Optimizing for your Mac (one-time, ~10–30 s)…")
-                    .font(.caption).foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
-        case .failed(let msg):
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                Text("Whisper download failed: \(msg). Open Settings → Providers → Local to retry.")
-                    .font(.caption).foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
-        default:
-            EmptyView()
-        }
+        // For every cloud half of the selection, require a key.
+        return !allCloudKeysProvided
     }
 
     /// Persist the user's card-3 picks when they advance to card 4.
@@ -757,22 +1178,32 @@ struct OnboardingView: View {
 
         appState.saveSettings()
 
-        switch providerChoice {
-        case .local:
+        if providerChoice.isLocal {
             let model = appState.settings.localWhisperModel
             Task { @MainActor in
                 try? await WhisperModelManager.shared.ensureReady(model: model)
             }
-        case .groq:
-            let trimmed = groqKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        // Persist every freshly-entered cloud key, regardless of which
+        // halves are cloud — the v1.0.6 path only wrote groqKey, which
+        // silently dropped OpenAI/Deepgram/Claude/Gemini onboarding
+        // entries. We walk the @State strings (not requiredKeychainKeys)
+        // because the user may have entered a key for a provider they
+        // then deselected — saving it costs nothing and helps if they
+        // come back to that provider in Settings later.
+        let entries: [(String, String)] = [
+            ("sprich.api.groq",      groqKey),
+            ("sprich.api.openai",    openAIKey),
+            ("sprich.api.deepgram",  deepgramKey),
+            ("sprich.api.anthropic", anthropicKey),
+            ("sprich.api.google",    googleKey),
+        ]
+        for (keychainKey, raw) in entries {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
-                KeychainManager.store(
-                    key: STTProviderType.groq.keychainKey,
-                    value: trimmed
-                )
+                KeychainManager.store(key: keychainKey, value: trimmed)
             }
-        default:
-            break
         }
     }
 
@@ -783,9 +1214,10 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Try it now").font(.title2).fontWeight(.bold)
 
-                Text("Hold the shortcut, say a sentence, release. Your transcription will appear right here in this window — not in another app.")
+                Text("Hold the shortcut, say a sentence, release.")
                     .font(.callout)
                     .foregroundColor(.secondary)
+                    .help("Your transcription will appear in this window — not in another app.")
 
                 shortcutHintRow
 
@@ -853,7 +1285,7 @@ struct OnboardingView: View {
             }
             ScrollView {
                 Text(capturedText.isEmpty
-                     ? "Hold Fn+Shift, say something — the transcription will land here, not in another app."
+                     ? "Hold Fn+Shift and say something."
                      : capturedText)
                     .font(.system(size: 14, design: capturedText.isEmpty ? .default : .monospaced))
                     .foregroundColor(capturedText.isEmpty ? .secondary : .primary)
