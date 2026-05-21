@@ -472,9 +472,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Always-visible truthful indicator of what THIS Mac's next
         // dictation will / won't send to the network. Live-updates via
         // the Combine sink set up below.
-        let networkRow = NSMenuItem(title: "🟢 Offline", action: nil, keyEquivalent: "")
+        //
+        // v1.0.6 wording fix: read both glyph + label from the indicator
+        // rather than hardcoding "🟢 Offline" — users were parsing
+        // "Offline" as "Sprich isn't working." The indicator now reads
+        // "On this Mac", matching the provider-card vocabulary.
+        let initialRoute = NetworkStatusIndicator.shared.route
+        let networkRow = NSMenuItem(
+            title: "\(initialRoute.glyph) \(initialRoute.shortLabel)",
+            action: nil,
+            keyEquivalent: ""
+        )
         networkRow.tag = 101
-        networkRow.toolTip = NetworkStatusIndicator.shared.route.tooltip
+        networkRow.toolTip = initialRoute.tooltip
         menu.addItem(networkRow)
         menu.addItem(NSMenuItem.separator())
 
