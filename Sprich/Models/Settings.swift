@@ -321,8 +321,16 @@ struct AppSettings: Codable {
 
     static var defaults: AppSettings {
         AppSettings(
-            sttProvider: .groq,
-            llmProvider: .groq,
+            // Local-first is the Phase 1 wedge: a fresh install hands you a
+            // fully on-device pipeline (STT + LLM cleanup) by default.
+            // Onboarding's "Your Mac: Recommended" panel presents the
+            // ~2.3 GB combined Whisper + Gemma download as the happy path,
+            // so the factory default matches what onboarding nudges
+            // toward. Users with a HardwareProbe failure or who skip the
+            // Gemma download can swap to a cloud LLM in Settings →
+            // Providers; existing users' saved choice is preserved.
+            sttProvider: .local,
+            llmProvider: .local,
             groqLLMModel: "llama-3.3-70b-versatile",
             claudeModel: "claude-haiku-4-20250414",
             googleModel: "gemini-2.5-flash",
