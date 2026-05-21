@@ -857,6 +857,11 @@ private struct AIModelsSection: View {
     let onRequestWhisperDownload: () -> Void
     let onRequestLLMDownload: () -> Void
 
+    /// Observed so the "Works offline" badge on the local AI-cleanup card
+    /// appears the moment Gemma finishes downloading. Cheap — same manager
+    /// the outer `SettingsView` already observes.
+    @ObservedObject private var llmManager = LLMModelManager.shared
+
     /// Sprint 3 polish #5 — STT/LLM "Configure" disclosures collapsed by
     /// default. Per-card so toggling one doesn't move the other.
     @State private var sttConfigExpanded = false
@@ -1025,6 +1030,12 @@ private struct AIModelsSection: View {
                     localIcon: "laptopcomputer",
                     localSubtitle: "Private / No API Key",
                     localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
+                    // Surfaced after v1.0.6 QA — users on Wi-Fi-off didn't
+                    // realise "On this Mac" was the answer to "how do I
+                    // keep Formal working when I'm offline?". Gating on
+                    // `.isReady` means the badge appears only once the
+                    // model is actually usable, not aspirationally.
+                    localBadge: llmManager.state.isReady ? "Works offline" : nil,
                     onSelectCloud: selectCloudLLM,
                     onSelectLocal: selectLocalLLM
                 )

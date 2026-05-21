@@ -172,8 +172,38 @@ class RecordingOverlayState: ObservableObject {
 
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
+    /// Observed so the overlay can react in-flight when the Mac drops
+    /// off Wi-Fi mid-recording. Lightweight — `NetworkReachability`
+    /// already runs for the auto-fallback path.
+    @ObservedObject private var reachability = NetworkReachability.shared
+    /// Source of truth for which legs of *this user's configuration* go
+    /// to the cloud. We don't compute it from `AppSettings` directly so
+    /// the chip stays consistent with the menubar / Settings Privacy
+    /// card (P1 positioning brief — one indicator, multiple surfaces).
+    @ObservedObject private var indicator = NetworkStatusIndicator.shared
 
     private var accent: Color { state.mode.accentColor }
+
+    /// True only when the user's configured LLM path needs the network
+    /// AND the network is currently unavailable. We deliberately do NOT
+    /// trip the chip for cloud-STT-only offline cases — `effectiveProvider`
+    /// auto-falls-back to local Whisper there, so the user gets a clean
+    /// transcript with no extra UI noise.
+    ///
+    /// Phase-gated to `.recording`: once the user has released the hotkey
+    /// the warning is moot — the post-stop fallback in `PipelineCoordinator`
+    /// (raw STT + inline "couldn't polish (offline)" note) handles the
+    /// actual recovery.
+    private var shouldShowOfflineChip: Bool {
+        guard state.phase == .recording else { return false }
+        guard !reachability.isReachable else { return false }
+        switch indicator.route {
+        case .cloudLLM, .both:
+            return true
+        case .offline, .cloudSTT:
+            return false
+        }
+    }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -210,6 +240,17 @@ struct RecordingOverlayView: View {
             // here ran on every dictation and was noisy under the waveform.
             // The Settings → Privacy card + menubar glyph still surface the
             // same state for users who care.
+            //
+            // v1.0.6 (QA 2026-05-20): a *narrower* chip is back — it only
+            // appears when the user's configured cloud LLM is genuinely
+            // unreachable right now AND they're recording. That's the one
+            // case where "your dictation is about to hit a dead end unless
+            // you switch modes" is worth interrupting for. Everything else
+            // (cloud STT offline, both online) stays quiet.
+            if shouldShowOfflineChip {
+                OfflineLLMChip()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             // Transcribed text bubble (appears after STT, before LLM cleanup)
             if let text = state.transcribedText, !text.isEmpty {
@@ -235,9 +276,50 @@ struct RecordingOverlayView: View {
         }
         .animation(.easeOut(duration: 0.15), value: state.phase == .cleaning)
         .animation(.easeOut(duration: 0.15), value: state.transcribedText)
+        .animation(.easeOut(duration: 0.15), value: shouldShowOfflineChip)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+}
+
+// MARK: - Offline LLM Chip
+//
+// Amber pre-flight chip shown beneath the HUD pill when the user is offline
+// AND their configured LLM path is cloud-bound. Non-blocking: the recording
+// keeps going, the user keeps speaking, and if they don't switch modes the
+// post-stop fallback in `PipelineCoordinator` pastes their raw STT text
+// with a brief "couldn't polish (offline)" note. The chip's only job is to
+// tell them up-front that Formal won't polish *this* dictation.
+//
+// Copy is intentionally short — anything longer would visually compete with
+// the waveform pill above. The mention of "Literal still works offline" is
+// the actionable nudge (Literal hotkey is right there).
+
+private struct OfflineLLMChip: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 10, weight: .semibold))
+            Text("Formal needs network — Literal still works offline.")
+                .font(.system(size: 11, weight: .medium))
+                .fixedSize()
+        }
+        .foregroundColor(Color.sprichInk)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(Color(red: 1.0, green: 0.86, blue: 0.55))   // amber
+                .shadow(color: Color.sprichInk.opacity(0.10), radius: 6, x: 0, y: 2)
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(Color(red: 0.78, green: 0.55, blue: 0.10),
+                              lineWidth: 0.5)
+        )
+        .fixedSize()
+        .accessibilityLabel("Formal mode requires a network connection. Literal mode still works offline.")
+    }
 }
 
 // MARK: - Sprich App Icon

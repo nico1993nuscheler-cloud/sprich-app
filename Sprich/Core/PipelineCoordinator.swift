@@ -50,6 +50,46 @@ class PipelineCoordinator {
         await TextInserter.insert(text)
     }
 
+    /// True for errors that almost certainly mean "the user is offline / the
+    /// provider host is unreachable" — the cases where pasting raw STT is a
+    /// better experience than losing the dictation. We deliberately keep this
+    /// narrow: 401 / 402 / rate-limit / empty-response are NOT offline-like
+    /// and the user genuinely needs to see them.
+    ///
+    /// Surfaced during v1.0.6 QA on 2026-05-20 when Wi-Fi was off (offline-
+    /// grace test for HMAC): Formal/Custom died with NSURLErrorNotConnectedToInternet
+    /// and the user lost the dictation entirely. Raw STT had already succeeded
+    /// via the on-device Whisper fallback — there was no reason to discard it.
+    private static func isOfflineLikeError(_ error: Error) -> Bool {
+        if let sprich = error as? SprichError {
+            if case .networkError = sprich { return true }
+        }
+        let ns = error as NSError
+        guard ns.domain == NSURLErrorDomain else { return false }
+        switch ns.code {
+        case NSURLErrorNotConnectedToInternet,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorDataNotAllowed,
+             NSURLErrorTimedOut,
+             NSURLErrorCannotFindHost,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorInternationalRoamingOff,
+             NSURLErrorCallIsActive,
+             NSURLErrorSecureConnectionFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Inline note appended to raw STT text when LLM cleanup is skipped
+    /// because the cloud provider was unreachable. Single source of truth
+    /// for the user-visible copy (kept short to minimise visual thump in
+    /// the destination text field).
+    private static let offlineFallbackNote =
+        "\n\n[Sprich: couldn't polish (offline) — pasted raw text.]"
+
     /// Decide which provider to use for a new dictation. Returns the
     /// user's configured choice unless:
     /// (a) that choice is a cloud provider, (b) there's no usable
@@ -357,18 +397,30 @@ class PipelineCoordinator {
             print("[Sprich] LLM offline-fallback: configured=\(appState.settings.llmProvider.displayName) → effective=\(effectiveLLM.displayName)")
         }
         #endif
-        let finalText = try await llmService.cleanup(
-            rawText: corrected,
-            mode: mode,
-            settings: appState.settings,
-            surface: surface,
-            providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
-        )
-        #if DEBUG
-        let t2 = CFAbsoluteTimeGetCurrent()
-        print("[Sprich] LLM: \(Int((t2 - t1) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
-        #endif
-        return finalText
+        do {
+            let finalText = try await llmService.cleanup(
+                rawText: corrected,
+                mode: mode,
+                settings: appState.settings,
+                surface: surface,
+                providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
+            )
+            #if DEBUG
+            let t2 = CFAbsoluteTimeGetCurrent()
+            print("[Sprich] LLM: \(Int((t2 - t1) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
+            #endif
+            return finalText
+        } catch let llmError where Self.isOfflineLikeError(llmError) {
+            // Last-line-of-defence for the case where even the local-LLM
+            // auto-fallback (above) couldn't kick in — typically: user
+            // is offline AND hasn't downloaded Gemma yet. STT succeeded
+            // (Whisper is local), so paste the raw transcript + a short
+            // note rather than discard the dictation.
+            #if DEBUG
+            print("[Sprich] LLM offline-like failure (\(llmError)) — falling back to raw STT")
+            #endif
+            return corrected + Self.offlineFallbackNote
+        }
     }
 
     /// Stop recording and process through the pipeline.
@@ -491,17 +543,33 @@ class PipelineCoordinator {
                     print("[Sprich] LLM offline-fallback: configured=\(appState.settings.llmProvider.displayName) → effective=\(effectiveLLM.displayName)")
                 }
                 #endif
-                finalText = try await llmService.cleanup(
-                    rawText: corrected,
-                    mode: mode,
-                    settings: appState.settings,
-                    surface: surface,
-                    providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
-                )
-                let t3 = CFAbsoluteTimeGetCurrent()
-                #if DEBUG
-                print("[Sprich] LLM: \(Int((t3 - t2) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
-                #endif
+                do {
+                    finalText = try await llmService.cleanup(
+                        rawText: corrected,
+                        mode: mode,
+                        settings: appState.settings,
+                        surface: surface,
+                        providerOverride: (effectiveLLM == appState.settings.llmProvider) ? nil : effectiveLLM
+                    )
+                    let t3 = CFAbsoluteTimeGetCurrent()
+                    #if DEBUG
+                    print("[Sprich] LLM: \(Int((t3 - t2) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
+                    #endif
+                } catch let llmError where Self.isOfflineLikeError(llmError) {
+                    // Last-line-of-defence for the case where even the
+                    // local-LLM auto-fallback above couldn't kick in
+                    // (user is offline AND hasn't downloaded Gemma yet).
+                    // STT succeeded — paste corrected raw text + a brief
+                    // note so the dictation isn't lost.
+                    //
+                    // The pre-flight chip in RecordingOverlay already
+                    // warned them this might happen; this is the
+                    // graceful landing for "they spoke anyway."
+                    #if DEBUG
+                    print("[Sprich] LLM offline-like failure (\(llmError)) — falling back to raw STT")
+                    #endif
+                    finalText = corrected + Self.offlineFallbackNote
+                }
             }
 
             // 4. Paste (or intercept, when onboarding's "Try it now" is active)

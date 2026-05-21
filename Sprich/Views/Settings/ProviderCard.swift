@@ -24,6 +24,12 @@ struct ProviderCard: View {
     let description: String
     let isSelected: Bool
     let action: () -> Void
+    /// Optional small badge rendered next to the title. Used by the AI-cleanup
+    /// "On this Mac" card to surface "Works offline" once the local model is
+    /// downloaded — gives users a discoverable answer to "what's the offline
+    /// path?" without adding a new copy block. Nil by default to keep STT
+    /// and other callers untouched.
+    var trailingBadge: String? = nil
 
     var body: some View {
         Button(action: action) {
@@ -35,6 +41,21 @@ struct ProviderCard: View {
                         .frame(width: 28)
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
+                    if let badge = trailingBadge {
+                        Text(badge)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color.green.opacity(0.85))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(Color.green.opacity(0.12))
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(Color.green.opacity(0.35),
+                                                       lineWidth: 0.5)
+                            )
+                            .accessibilityLabel(badge)
+                    }
                     Spacer()
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
@@ -87,6 +108,11 @@ struct ProviderCardPair: View {
     let localIcon: String
     let localSubtitle: String
     let localDescription: String
+    /// Optional badge for the local card (e.g. "Works offline"). Defaults
+    /// to nil so existing call sites (Onboarding, STT card) don't need
+    /// edits. The AI-cleanup card in Settings sets this once the on-device
+    /// model is ready.
+    var localBadge: String? = nil
 
     let onSelectCloud: () -> Void
     let onSelectLocal: () -> Void
@@ -107,7 +133,8 @@ struct ProviderCardPair: View {
                 subtitle: localSubtitle,
                 description: localDescription,
                 isSelected: isLocalSelected,
-                action: onSelectLocal
+                action: onSelectLocal,
+                trailingBadge: localBadge
             )
         }
     }
