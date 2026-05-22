@@ -22,7 +22,9 @@ execution, key extraction, audio exfiltration) get a same-week patch.
 In scope:
 
 - The Sprich macOS app (Swift source in this repository)
-- The Supabase Edge Functions in [`supabase/functions/`](./supabase/functions)
+- The Sprich backend (license redemption, auth, transactional email) — source
+  lives in a separate private repo; report anything you can reproduce from the
+  client side via the same email
 - The Sprich auto-update channel (Sparkle appcast + signed DMG delivery)
 
 Out of scope:
