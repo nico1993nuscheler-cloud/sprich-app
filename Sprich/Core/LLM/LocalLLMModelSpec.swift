@@ -7,9 +7,6 @@ import Foundation
 /// SHA (so we don't track `main`), the GGUF filename within that repo, the
 /// expected file size in bytes (drives download UX copy), and the expected
 /// SHA-256 (post-download verification — llama.cpp loaders do not verify).
-///
-/// Source plan: `~/Claude/40_Projects/Sprich/local-llm-distribution-plan.md`
-/// §§ C1, C2, C3.
 struct LocalLLMModelSpec: Equatable {
 
     /// Stable user-facing identifier — `<model>-<quant>` slug.

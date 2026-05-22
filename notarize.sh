@@ -21,8 +21,8 @@
 #      app-specific password at appleid.apple.com (Sign-In and Security →
 #      App-Specific Passwords) and store it once with:
 #        xcrun notarytool store-credentials sprich-notarytool \
-#            --apple-id nico1993nuscheler@gmail.com \
-#            --team-id AQVX35VD3G \
+#            --apple-id <your-apple-id-email> \
+#            --team-id <your-developer-team-id> \
 #            --password <app-specific-password>
 #      Once stored, the raw password can be revoked at appleid.apple.com —
 #      Apple validates the cached credential token, not the password text.
