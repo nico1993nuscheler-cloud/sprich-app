@@ -31,8 +31,7 @@ enum TranscriptionMode: String, Codable, Equatable, CaseIterable {
     /// `PipelineCoordinator.swift:170,322,435-440`). The prompt is kept
     /// here for the contract — if a future code path ever routes Literal
     /// through the LLM (e.g. a hypothetical "Literal + LLM polish"
-    /// feature), this is what would ship. See
-    /// `~/Claude/40_Projects/Sprich/proposed-prompt-change.md` § Important.
+    /// feature), this is what would ship.
     ///
     /// **Formal's formatting rule is a deliberate if/else** that the 1B
     /// local model can follow without ambiguity. The Destination line is

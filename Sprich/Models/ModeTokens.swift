@@ -2,13 +2,9 @@ import SwiftUI
 
 // MARK: - Sprich Design Tokens
 //
-// Source of truth: `~/Code/Sprich/.tmp/design-handoff/.../colors_and_type.css`
-// from Claude Design 2026-05-01 handoff. These hex values are the canonical
-// brand palette — keep this file in sync with that CSS, not vice versa.
-//
-// IMPORTANT: Mode accent colors are *product-UI only*. Marketing/landing copy
-// uses ink + forest + cream as the visible palette; modes only show inside
-// the recording overlay and Settings provider rows.
+// Canonical brand palette. Mode accent colors are *product-UI only* —
+// marketing/landing copy uses ink + forest + cream as the visible palette,
+// and modes only show inside the recording overlay and Settings provider rows.
 
 extension Color {
     // Mode accents (product-UI only)

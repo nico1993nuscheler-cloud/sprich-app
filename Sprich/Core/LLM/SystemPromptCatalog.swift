@@ -7,12 +7,10 @@ import Foundation
 /// occasionally for the other 13 supported languages too). The fix is
 /// runtime-side prompt selection — send the model a prompt in the
 /// detected source language. The same catalog drives both cloud and
-/// local paths so prompt-level parity is automatic and structural
-/// (see `proposed-prompt-change.md` § "Cloud / Local behavioral parity").
+/// local paths so prompt-level parity is automatic and structural.
 ///
 /// **Phase 1 ship languages:**
 /// - `en`, `de` — empirically validated on Gemma 3 1B Q4_K_M
-///   (`~/Claude/40_Projects/Sprich/benchmarks/2026-05-local-llm.md`)
 /// - `fr`, `es`, `it`, `pt`, `nl` — structurally translated from the
 ///   EN/DE pair; NOT empirically validated. Settings discloses
 ///   "Best results: English, German." Validation harness deferred to
@@ -20,7 +18,7 @@ import Foundation
 ///
 /// **Phase 2 ship languages** (deferred): `pl`, `sv`, `tr`, `ru`, `ar`,
 /// `hi`, `zh`, `ja`. All route through the EN fallback prompt until each
-/// is empirically validated (`local-llm-distribution-plan.md` § C7).
+/// is empirically validated.
 ///
 /// **Routing logic:**
 /// - The caller passes the *detected* source language from WhisperKit

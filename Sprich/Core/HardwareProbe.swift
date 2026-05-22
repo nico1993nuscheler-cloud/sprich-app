@@ -8,14 +8,9 @@ import Darwin
 /// things — chip family, physical RAM, macOS version — and returns one
 /// of three tiers.
 ///
-/// Spec: `~/Claude/40_Projects/Sprich/local-llm-scoping-session-agenda.md`
-/// § Decision 7a.
-///
-/// Latency expectations in `tier.latencyExpectationCopy` come from
-/// `benchmarks/2026-05-local-llm.md` — both onboarding and marketing
-/// pull from the same source so a "~1.4 s" claim on the landing page
-/// matches what the app says at install time. Refresh both when the
-/// M1 8 GB re-measurement lands (`P2-LLM-20`).
+/// Latency expectations in `tier.latencyExpectationCopy` are sourced from
+/// the same benchmark numbers as the landing-page copy, so a "~1.4 s"
+/// claim on marketing matches what the app says at install time.
 enum HardwareProbe {
 
     enum Tier: Equatable {
