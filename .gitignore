@@ -36,3 +36,9 @@ dist/
 
 # Temporary scratch (design handoffs, exploratory notes, etc.)
 .tmp/
+
+# Claude Code local state (worktrees, agent scratch)
+.claude/
+
+# Standalone landing-page checkout (lives in the sprich-landing repo)
+landing/
