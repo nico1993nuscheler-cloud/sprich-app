@@ -8,7 +8,6 @@ import Foundation
 /// not in keeping this string secret.
 enum SupabaseConfig {
     /// `sprich-prod` project ref (eu-central-1, Frankfurt).
-    /// See `~/.claude/projects/-Users-niconuscheler-Code-Sprich/memory/infra_sprich_phase1.md`.
     static let projectURL = URL(string: "https://djiixtplbsutuiuxfhiy.supabase.co")!
 
     /// Modern publishable key (`sb_publishable_…`). Rotatable independently of
