@@ -59,9 +59,16 @@ final class NetworkStatusIndicator: ObservableObject {
             }
         }
 
+        /// User-facing short label. The `.offline` case reads **"On this Mac"**,
+        /// not "Offline": v1.0.6 QA confirmed users parse "Offline" as
+        /// "Sprich itself isn't working" rather than "this dictation never
+        /// leaves my Mac." The internal enum case stays `.offline` for code
+        /// clarity, but every user-visible surface (menubar, Settings →
+        /// Privacy, tooltip) speaks the same provider-card language
+        /// ("On this Mac") as `STTProviderType.local.displayName`.
         var shortLabel: String {
             switch self {
-            case .offline:                       return "Offline"
+            case .offline:                       return "On this Mac"
             case .cloudSTT:                      return "Cloud STT"
             case .cloudLLM:                      return "Cloud LLM"
             case .both:                          return "Cloud STT + LLM"
@@ -73,7 +80,7 @@ final class NetworkStatusIndicator: ObservableObject {
         var tooltip: String {
             switch self {
             case .offline:
-                return "Offline: your audio and text stayed on your Mac during this dictation."
+                return "On this Mac: your audio and text stayed on your Mac during this dictation. Nothing was sent to the cloud."
             case .cloudSTT(let p):
                 return "Cloud STT (\(p)): Whisper transcription goes to \(p) for this dictation. LLM cleanup is local."
             case .cloudLLM(let p):
