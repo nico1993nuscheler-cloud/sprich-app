@@ -30,6 +30,7 @@
 		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
 		A10000062 /* StbImageStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000062 /* StbImageStubs.swift */; };
 		A10000063 /* CorrectionLearner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000063 /* CorrectionLearner.swift */; };
+		A10000066 /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000066 /* LaunchAtLoginManager.swift */; };
 		A10000064 /* CorrectionBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000064 /* CorrectionBanner.swift */; };
 		A10000065 /* DictionarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000065 /* DictionarySection.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
@@ -118,6 +119,7 @@
 		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
 		B10000062 /* StbImageStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StbImageStubs.swift; sourceTree = "<group>"; };
 		B10000063 /* CorrectionLearner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionLearner.swift; sourceTree = "<group>"; };
+		B10000066 /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
 		B10000064 /* CorrectionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionBanner.swift; sourceTree = "<group>"; };
 		B10000065 /* DictionarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/DictionarySection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -174,6 +176,7 @@
 				B10000022 /* TextPostProcessor.swift */,
 				B10000025 /* SurfaceDetector.swift */,
 				B10000063 /* CorrectionLearner.swift */,
+				B10000066 /* LaunchAtLoginManager.swift */,
 				B10000030 /* NetworkReachability.swift */,
 				B10000042 /* HardwareProbe.swift */,
 				B10000047 /* NetworkStatusIndicator.swift */,
@@ -404,6 +407,7 @@
 				A10000061 /* MissingKeyBanner.swift in Sources */,
 				A10000062 /* StbImageStubs.swift in Sources */,
 				A10000063 /* CorrectionLearner.swift in Sources */,
+				A10000066 /* LaunchAtLoginManager.swift in Sources */,
 				A10000064 /* CorrectionBanner.swift in Sources */,
 				A10000065 /* DictionarySection.swift in Sources */,
 			);

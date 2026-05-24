@@ -732,10 +732,47 @@ private struct ModesSection: View {
 private struct GeneralSection: View {
     @EnvironmentObject var appState: AppState
 
+    /// Mirrors `SMAppService.mainApp.status == .enabled`. Re-read onAppear
+    /// because the user can flip this in System Settings → Login Items
+    /// while Sprich is running. (P1-PRD-16)
+    @State private var launchAtLogin: Bool = LaunchAtLoginManager.isEnabled
+    @State private var launchAtLoginError: String? = nil
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 SettingsSectionHeader(icon: "gear", title: "General")
+
+                SettingsCard {
+                    Text("Startup")
+                        .font(.caption).foregroundColor(.secondary)
+                    Toggle("Launch at login", isOn: $launchAtLogin)
+                        .toggleStyle(.switch)
+                        .onChange(of: launchAtLogin) { _, newValue in
+                            do {
+                                try LaunchAtLoginManager.setEnabled(newValue)
+                                launchAtLoginError = nil
+                            } catch {
+                                // Revert to system truth so the UI never lies
+                                // about the actual registration state.
+                                launchAtLogin = LaunchAtLoginManager.isEnabled
+                                launchAtLoginError = error.localizedDescription
+                            }
+                        }
+                    Text("Sprich opens silently in the menubar when you log in. No window pops up — onboarding and sign-in surfaces only appear on a manual launch from Finder.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let err = launchAtLoginError {
+                        Text(err)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .onAppear {
+                    launchAtLogin = LaunchAtLoginManager.isEnabled
+                }
 
                 SettingsCard {
                     Text("Input mode")

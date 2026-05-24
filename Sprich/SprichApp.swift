@@ -28,7 +28,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pipeline: PipelineCoordinator!
     private var hotkeyManager: HotkeyManager!
 
+    /// True when launchd started us as a Login Item (P1-PRD-16). Captured
+    /// once at didFinishLaunching so any later check sees the same answer
+    /// even after Apple Events arrive (e.g. a deep-link `sprich://` URL).
+    private var launchedAsLoginItem: Bool = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Snapshot the login-item state before any further AppleEvent
+        // processing can change `currentAppleEvent`. See P1-PRD-16.
+        launchedAsLoginItem = LaunchAtLoginManager.wasLaunchedAsLoginItem
+
         // Hide from dock (belt + suspenders with LSUIElement)
         NSApp.setActivationPolicy(.accessory)
 
@@ -74,7 +83,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // are jarring on launch and the menubar status item ("Accessibility:
         // ❌ Not granted — click to fix") already surfaces a revoked grant.
         let hasOnboarded = UserDefaults.standard.bool(forKey: "sprich.hasCompletedOnboarding")
-        if !hasOnboarded {
+        if !hasOnboarded && !launchedAsLoginItem {
+            // Headless login-item launches stay menubar-only — the
+            // onboarding window will surface next time the user opens
+            // the app from Finder, or via "Show welcome again" in
+            // Diagnostics. (P1-PRD-16 Start-minimized.)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 self?.showOnboardingWindow()
             }
@@ -112,7 +125,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         TrialState.shared.bootstrapAfterLaunch()
         observeAuthState()
         let onboarded = UserDefaults.standard.bool(forKey: "sprich.hasCompletedOnboarding")
-        if !AuthService.shared.isSignedIn && onboarded {
+        if !AuthService.shared.isSignedIn && onboarded && !launchedAsLoginItem {
+            // Same reasoning as onboarding: a Mac restart shouldn't pop a
+            // sign-in window in the user's face. The menubar account row
+            // still surfaces the signed-out state.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.showSignInWindow()
             }
