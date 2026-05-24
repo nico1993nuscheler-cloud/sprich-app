@@ -162,6 +162,11 @@ struct AppSettings: Codable {
     var glossaryTerms: String            // comma-separated vocabulary list (Whisper bias)
     var glossaryReplacements: [GlossaryReplacement]  // post-STT find→replace
 
+    /// When true, Sprich watches for user corrections in the target app
+    /// within 30 s after a dictation and proposes adding them to
+    /// `glossaryReplacements`. See `CorrectionLearner` and P1-PRD-24.
+    var autoLearnEnabled: Bool
+
     var inputMode: InputMode
     var maxRecordingDuration: Int  // seconds
 
@@ -252,6 +257,7 @@ struct AppSettings: Codable {
         self.customModePrompt     = (try? c.decode(String.self,          forKey: .customModePrompt))     ?? d.customModePrompt
         self.glossaryTerms        = (try? c.decode(String.self,          forKey: .glossaryTerms))        ?? d.glossaryTerms
         self.glossaryReplacements = (try? c.decode([GlossaryReplacement].self, forKey: .glossaryReplacements)) ?? d.glossaryReplacements
+        self.autoLearnEnabled     = (try? c.decode(Bool.self,            forKey: .autoLearnEnabled))     ?? d.autoLearnEnabled
         self.inputMode            = (try? c.decode(InputMode.self,       forKey: .inputMode))            ?? d.inputMode
         self.maxRecordingDuration = (try? c.decode(Int.self,             forKey: .maxRecordingDuration)) ?? d.maxRecordingDuration
         self.adaptToSurface       = (try? c.decode(Bool.self,            forKey: .adaptToSurface))       ?? d.adaptToSurface
@@ -277,6 +283,7 @@ struct AppSettings: Codable {
         customModePrompt: String,
         glossaryTerms: String,
         glossaryReplacements: [GlossaryReplacement],
+        autoLearnEnabled: Bool,
         inputMode: InputMode,
         maxRecordingDuration: Int,
         adaptToSurface: Bool,
@@ -298,6 +305,7 @@ struct AppSettings: Codable {
         self.customModePrompt = customModePrompt
         self.glossaryTerms = glossaryTerms
         self.glossaryReplacements = glossaryReplacements
+        self.autoLearnEnabled = autoLearnEnabled
         self.inputMode = inputMode
         self.maxRecordingDuration = maxRecordingDuration
         self.adaptToSurface = adaptToSurface
@@ -336,6 +344,7 @@ struct AppSettings: Codable {
             customModePrompt: TranscriptionMode.custom.defaultSystemPrompt,
             glossaryTerms: "",
             glossaryReplacements: [],
+            autoLearnEnabled: true,
             inputMode: .holdToTalk,
             maxRecordingDuration: 300,
             adaptToSurface: true,

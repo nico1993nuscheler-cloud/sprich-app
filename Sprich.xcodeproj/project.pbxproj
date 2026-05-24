@@ -29,6 +29,9 @@
 		A10000060 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000060 /* ProviderCard.swift */; };
 		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
 		A10000062 /* StbImageStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000062 /* StbImageStubs.swift */; };
+		A10000063 /* CorrectionLearner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000063 /* CorrectionLearner.swift */; };
+		A10000064 /* CorrectionBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000064 /* CorrectionBanner.swift */; };
+		A10000065 /* DictionarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000065 /* DictionarySection.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
 		A10000019 /* TextPostProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000022 /* TextPostProcessor.swift */; };
 		A10000020 /* ShortcutHelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000023 /* ShortcutHelpView.swift */; };
@@ -114,6 +117,9 @@
 		B10000060 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ProviderCard.swift; sourceTree = "<group>"; };
 		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
 		B10000062 /* StbImageStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StbImageStubs.swift; sourceTree = "<group>"; };
+		B10000063 /* CorrectionLearner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionLearner.swift; sourceTree = "<group>"; };
+		B10000064 /* CorrectionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionBanner.swift; sourceTree = "<group>"; };
+		B10000065 /* DictionarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/DictionarySection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -167,6 +173,7 @@
 				B10000009 /* SprichError.swift */,
 				B10000022 /* TextPostProcessor.swift */,
 				B10000025 /* SurfaceDetector.swift */,
+				B10000063 /* CorrectionLearner.swift */,
 				B10000030 /* NetworkReachability.swift */,
 				B10000042 /* HardwareProbe.swift */,
 				B10000047 /* NetworkStatusIndicator.swift */,
@@ -245,6 +252,8 @@
 				B10000040 /* AccountView.swift */,
 				B10000060 /* ProviderCard.swift */,
 				B10000061 /* MissingKeyBanner.swift */,
+				B10000064 /* CorrectionBanner.swift */,
+				B10000065 /* DictionarySection.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -394,6 +403,9 @@
 				A10000060 /* ProviderCard.swift in Sources */,
 				A10000061 /* MissingKeyBanner.swift in Sources */,
 				A10000062 /* StbImageStubs.swift in Sources */,
+				A10000063 /* CorrectionLearner.swift in Sources */,
+				A10000064 /* CorrectionBanner.swift in Sources */,
+				A10000065 /* DictionarySection.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

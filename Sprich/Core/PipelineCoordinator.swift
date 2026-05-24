@@ -17,6 +17,12 @@ class PipelineCoordinator {
     /// Bundle ID of the frontmost app captured at hotkey-press time.
     /// Used later to resolve the destination `Surface` for Formal mode.
     private var capturedBundleID: String?
+    /// PID of the frontmost app captured at hotkey-press time. Captured
+    /// BEFORE the RecordingOverlay panel shows — otherwise
+    /// `NSWorkspace.frontmostApplication` returns Sprich's overlay and
+    /// any PID-scoped Accessibility observer (CorrectionLearner) would
+    /// attach to the wrong process. See P1-PRD-24-pre.
+    private var capturedPid: pid_t?
     /// Provider resolved at hotkey-press time. May differ from the
     /// user's configured choice when we auto-fall-back to Local while
     /// offline. Stashed so `stopAndProcess` uses the same provider
@@ -225,7 +231,15 @@ class PipelineCoordinator {
             currentMode = mode
             // Snapshot the frontmost app BEFORE any HUD appears. Sprich's
             // panel is non-activating, so this remains the user's target.
-            capturedBundleID = SurfaceDetector.captureFrontmostBundleID()
+            // PID capture must happen here too — once the overlay shows,
+            // NSWorkspace.frontmostApplication returns Sprich's own panel
+            // and CorrectionLearner would attach to the wrong process.
+            let front = NSWorkspace.shared.frontmostApplication
+            capturedBundleID = front?.bundleIdentifier
+            capturedPid = front?.processIdentifier
+            #if DEBUG
+            print("[Sprich] captured target PID=\(capturedPid ?? -1) bundle=\(capturedBundleID ?? "?")")
+            #endif
             try recorder.startRecording()
             appState.status = .recording(mode)
             RecordingOverlayController.shared.show(
@@ -276,6 +290,8 @@ class PipelineCoordinator {
         appState.status = .ready
         currentMode = nil
         activeProvider = nil
+        capturedPid = nil
+        capturedBundleID = nil
     }
 
     /// The STT→glossary→(LLM or local polish) path, factored out of
@@ -477,6 +493,18 @@ class PipelineCoordinator {
             print("[Sprich] ✅ Total: \(Int((tEnd - pipelineStart) * 1000))ms")
             #endif
 
+            // P1-PRD-24 — start watching the target app for a user
+            // correction of `finalText` within 30 s. Skip when the
+            // dictation was intercepted by onboarding (no real paste
+            // target) or when the user disabled auto-learn. We need
+            // the target PID captured at hotkey-press time — without
+            // it, the AXObserver would attach to Sprich's own panel.
+            if appState.settings.autoLearnEnabled,
+               interceptOutput == nil,
+               let targetPid = capturedPid {
+                startAutoLearn(targetPid: targetPid, originalText: finalText, mode: mode)
+            }
+
             RecordingOverlayController.shared.dismiss()
             appState.status = .ready
 
@@ -515,12 +543,46 @@ class PipelineCoordinator {
         }
 
         currentMode = nil
+        activeProvider = nil
+        capturedPid = nil
+        capturedBundleID = nil
+    }
+
+    /// P1-PRD-24 — hook CorrectionLearner up for a 30 s window after a
+    /// successful dictation. When a correction passes all guardrails we
+    /// append it to `glossaryReplacements` silently and surface a small
+    /// non-interactive toast so the user knows it happened. No
+    /// confirmation step — wrong learns are removed from Settings →
+    /// Dictionary.
+    private func startAutoLearn(targetPid: pid_t, originalText: String, mode: TranscriptionMode) {
+        CorrectionLearner.shared.watchForCorrection(
+            targetPid: targetPid,
+            originalText: originalText,
+            mode: mode
+        ) { [weak self] from, to in
+            Task { @MainActor in
+                guard let self else { return }
+                // Case-insensitive dedup against existing entries.
+                if self.appState.settings.glossaryReplacements
+                    .contains(where: { $0.from.lowercased() == from.lowercased() }) {
+                    return
+                }
+                self.appState.settings.glossaryReplacements.append(
+                    GlossaryReplacement(from: from, to: to)
+                )
+                self.appState.saveSettings()
+                CorrectionBannerController.shared.present(from: from, to: to)
+            }
+        }
     }
 
     /// Cancel any in-progress recording.
     func cancel() {
         recorder.cancelRecording()
         currentMode = nil
+        activeProvider = nil
+        capturedPid = nil
+        capturedBundleID = nil
         appState.status = .ready
         RecordingOverlayController.shared.dismiss()
     }
