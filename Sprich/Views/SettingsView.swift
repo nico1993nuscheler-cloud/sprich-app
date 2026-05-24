@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// Sprint 3 IA: sidebar (NavigationSplitView), 6 sections.
+/// Sprint 3 IA: sidebar (NavigationSplitView), 7 sections.
+/// Dictionary section added with P1-PRD-24 — surfaces glossary
+/// replacements + the Auto-learn toggle.
 ///
 /// `SettingsSection` is the deep-link target for `MissingKeyBanner`'s
 /// "Open Settings → AI cleanup" CTA (P1-UX-14). The banner posts a
@@ -10,6 +12,7 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
     case account
     case aiModels
     case modes
+    case dictionary
     case general
     case privacy
     case about
@@ -18,23 +21,25 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .account:   return "Account"
-        case .aiModels:  return "AI Models"
-        case .modes:     return "Modes"
-        case .general:   return "General"
-        case .privacy:   return "Privacy"
-        case .about:     return "About"
+        case .account:    return "Account"
+        case .aiModels:   return "AI Models"
+        case .modes:      return "Modes"
+        case .dictionary: return "Dictionary"
+        case .general:    return "General"
+        case .privacy:    return "Privacy"
+        case .about:      return "About"
         }
     }
 
     var iconName: String {
         switch self {
-        case .account:   return "person.crop.circle"
-        case .aiModels:  return "brain"
-        case .modes:     return "text.quote"
-        case .general:   return "gear"
-        case .privacy:   return "lock.shield"
-        case .about:     return "info.circle"
+        case .account:    return "person.crop.circle"
+        case .aiModels:   return "brain"
+        case .modes:      return "text.quote"
+        case .dictionary: return "text.book.closed"
+        case .general:    return "gear"
+        case .privacy:    return "lock.shield"
+        case .about:      return "info.circle"
         }
     }
 }
@@ -102,10 +107,11 @@ struct SettingsView: View {
                         onRequestLLMDownload: { showLLMDownload = true }
                     )
                     .environmentObject(appState)
-                case .modes:     ModesSection().environmentObject(appState)
-                case .general:   GeneralSection().environmentObject(appState)
-                case .privacy:   PrivacySection()
-                case .about:     AboutSection()
+                case .modes:      ModesSection().environmentObject(appState)
+                case .dictionary: DictionarySection().environmentObject(appState)
+                case .general:    GeneralSection().environmentObject(appState)
+                case .privacy:    PrivacySection()
+                case .about:      AboutSection()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
