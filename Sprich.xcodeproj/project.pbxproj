@@ -31,6 +31,8 @@
 		A10000062 /* StbImageStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000062 /* StbImageStubs.swift */; };
 		A10000063 /* CorrectionLearner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000063 /* CorrectionLearner.swift */; };
 		A10000066 /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000066 /* LaunchAtLoginManager.swift */; };
+		A10000067 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000067 /* HistoryStore.swift */; };
+		A10000068 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000068 /* HomeSection.swift */; };
 		A10000064 /* CorrectionBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000064 /* CorrectionBanner.swift */; };
 		A10000065 /* DictionarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000065 /* DictionarySection.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
@@ -120,6 +122,8 @@
 		B10000062 /* StbImageStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StbImageStubs.swift; sourceTree = "<group>"; };
 		B10000063 /* CorrectionLearner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionLearner.swift; sourceTree = "<group>"; };
 		B10000066 /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
+		B10000067 /* HistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStore.swift; sourceTree = "<group>"; };
+		B10000068 /* HomeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/HomeSection.swift; sourceTree = "<group>"; };
 		B10000064 /* CorrectionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionBanner.swift; sourceTree = "<group>"; };
 		B10000065 /* DictionarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/DictionarySection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -177,6 +181,7 @@
 				B10000025 /* SurfaceDetector.swift */,
 				B10000063 /* CorrectionLearner.swift */,
 				B10000066 /* LaunchAtLoginManager.swift */,
+				B10000067 /* HistoryStore.swift */,
 				B10000030 /* NetworkReachability.swift */,
 				B10000042 /* HardwareProbe.swift */,
 				B10000047 /* NetworkStatusIndicator.swift */,
@@ -257,6 +262,7 @@
 				B10000061 /* MissingKeyBanner.swift */,
 				B10000064 /* CorrectionBanner.swift */,
 				B10000065 /* DictionarySection.swift */,
+				B10000068 /* HomeSection.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -408,6 +414,8 @@
 				A10000062 /* StbImageStubs.swift in Sources */,
 				A10000063 /* CorrectionLearner.swift in Sources */,
 				A10000066 /* LaunchAtLoginManager.swift in Sources */,
+				A10000067 /* HistoryStore.swift in Sources */,
+				A10000068 /* HomeSection.swift in Sources */,
 				A10000064 /* CorrectionBanner.swift in Sources */,
 				A10000065 /* DictionarySection.swift in Sources */,
 			);

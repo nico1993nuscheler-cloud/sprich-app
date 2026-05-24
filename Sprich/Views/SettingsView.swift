@@ -9,6 +9,7 @@ import SwiftUI
 /// `.sprichOpenSettingsSection` notification carrying the section to
 /// route to; `SettingsView` listens and updates `selection`.
 enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
+    case home
     case account
     case aiModels
     case modes
@@ -21,6 +22,7 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .home:       return "Home"
         case .account:    return "Account"
         case .aiModels:   return "AI Models"
         case .modes:      return "Modes"
@@ -33,6 +35,7 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
 
     var iconName: String {
         switch self {
+        case .home:       return "house"
         case .account:    return "person.crop.circle"
         case .aiModels:   return "brain"
         case .modes:      return "text.quote"
@@ -94,6 +97,7 @@ struct SettingsView: View {
             // works end-to-end; P1-UX-03 through P1-UX-12 replace them.
             Group {
                 switch selection {
+                case .home:      HomeSection()
                 case .account:   AccountSection()
                 case .aiModels:
                     AIModelsSection(

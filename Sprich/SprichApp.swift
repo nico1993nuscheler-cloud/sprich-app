@@ -64,6 +64,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // surgical alternative (only touch `Cache.db*`, leave Core ML
         // and WhisperKit's dirs alone).
 
+        // P1-PRD-12 — drop entries older than 30 days. Cheap (single
+        // DELETE in SwiftData), runs once per launch, keeps the History
+        // store bounded without a background daemon.
+        HistoryStore.shared.pruneOldEntries()
+
         // Initialize pipeline
         pipeline = PipelineCoordinator(appState: appState)
 
