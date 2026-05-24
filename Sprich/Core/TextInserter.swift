@@ -8,8 +8,15 @@ enum TextInserter {
 
     /// Insert text into the active app's focused text field.
     /// Uses clipboard + Cmd+V simulation (same approach as Raycast, Alfred, TextExpander).
+    ///
+    /// Single choke-point for *all* paste paths (Literal / Formal / Custom) — input
+    /// is run through `InputSanitizer.sanitizeForPaste` here so no caller can forget.
     static func insert(_ text: String) async {
         let pasteboard = NSPasteboard.general
+
+        // Defense-in-depth: strip control chars, NULL bytes, and Unicode bidi
+        // overrides (Trojan Source, CVE-2021-42574). Whitespace is preserved.
+        let safeText = InputSanitizer.sanitizeForPaste(text)
 
         // 1. Save current clipboard contents
         let savedContents = savePasteboard(pasteboard)
@@ -21,7 +28,7 @@ enum TextInserter {
 
         // 2. Set our text on the clipboard
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(safeText, forType: .string)
 
         // 3. Small delay to ensure pasteboard is ready
         try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
@@ -46,6 +53,9 @@ enum TextInserter {
         keyUp?.flags = .maskCommand
 
         keyDown?.post(tap: .cgAnnotatedSessionEventTap)
+        // Apps with aggressive IME (Slack, Discord, Word autocorrect, some Electron
+        // surfaces) coalesce or drop zero-gap key events. 8 ms matches OW v1.7.1.
+        usleep(8_000)
         keyUp?.post(tap: .cgAnnotatedSessionEventTap)
     }
 
