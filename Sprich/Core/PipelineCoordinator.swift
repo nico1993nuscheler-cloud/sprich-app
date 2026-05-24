@@ -17,6 +17,11 @@ class PipelineCoordinator {
     /// Bundle ID of the frontmost app captured at hotkey-press time.
     /// Used later to resolve the destination `Surface` for Formal mode.
     private var capturedBundleID: String?
+    /// Localized name of the frontmost app at hotkey-press time
+    /// ("Slack", "Mail"). Persisted into the HistoryEntry alongside
+    /// the dictation so History rows read user-friendly rather than
+    /// raw bundle-ID. nil when capture fails.
+    private var capturedAppName: String?
     /// PID of the frontmost app captured at hotkey-press time. Captured
     /// BEFORE the RecordingOverlay panel shows — otherwise
     /// `NSWorkspace.frontmostApplication` returns Sprich's overlay and
@@ -237,6 +242,7 @@ class PipelineCoordinator {
             let front = NSWorkspace.shared.frontmostApplication
             capturedBundleID = front?.bundleIdentifier
             capturedPid = front?.processIdentifier
+            capturedAppName = front?.localizedName
             #if DEBUG
             print("[Sprich] captured target PID=\(capturedPid ?? -1) bundle=\(capturedBundleID ?? "?")")
             #endif
@@ -276,6 +282,16 @@ class PipelineCoordinator {
             let capSeconds = appState.settings.maxRecordingDuration
             let continuation = "\n\n[Sprich: recording reached the \(capSeconds)-second limit — press the hotkey again to continue.]"
             await deliver(finalText + continuation)
+            // Record the auto-stopped dictation into history too — only
+            // the pre-continuation text, since the bracket is Sprich's
+            // own message, not user content.
+            if interceptOutput == nil {
+                HistoryStore.shared.record(
+                    text: finalText,
+                    mode: mode,
+                    targetApp: capturedAppName
+                )
+            }
         } catch {
             #if DEBUG
             print("[Sprich] ❌ Auto-stop pipeline error: \(error)")
@@ -292,6 +308,7 @@ class PipelineCoordinator {
         activeProvider = nil
         capturedPid = nil
         capturedBundleID = nil
+        capturedAppName = nil
     }
 
     /// The STT→glossary→(LLM or local polish) path, factored out of
@@ -493,6 +510,18 @@ class PipelineCoordinator {
             print("[Sprich] ✅ Total: \(Int((tEnd - pipelineStart) * 1000))ms")
             #endif
 
+            // P1-PRD-12 — record into the 30-day rolling History store.
+            // Skip when the onboarding intercept was active (the "Try it
+            // now" surface is not a real dictation the user pasted
+            // anywhere) and when the text is empty.
+            if interceptOutput == nil {
+                HistoryStore.shared.record(
+                    text: finalText,
+                    mode: mode,
+                    targetApp: capturedAppName
+                )
+            }
+
             // P1-PRD-24 — start watching the target app for a user
             // correction of `finalText` within 30 s. Skip when the
             // dictation was intercepted by onboarding (no real paste
@@ -546,6 +575,7 @@ class PipelineCoordinator {
         activeProvider = nil
         capturedPid = nil
         capturedBundleID = nil
+        capturedAppName = nil
     }
 
     /// P1-PRD-24 — hook CorrectionLearner up for a 30 s window after a
@@ -583,6 +613,7 @@ class PipelineCoordinator {
         activeProvider = nil
         capturedPid = nil
         capturedBundleID = nil
+        capturedAppName = nil
         appState.status = .ready
         RecordingOverlayController.shared.dismiss()
     }
