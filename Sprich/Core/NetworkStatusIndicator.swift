@@ -9,8 +9,6 @@ import Combine
 /// This type is the source of truth that the recording overlay, the menubar
 /// glyph, and the Settings → Privacy panel all subscribe to.
 ///
-/// Design spec: `~/Claude/40_Projects/Sprich/network-off-proof-ui-spec.md`.
-///
 /// **Pure derivation — no new outbound calls.** The indicator reads existing
 /// state (selected providers + license-check beacon) and reports the truth.
 /// If a sharp reader runs Sprich behind Little Snitch and sees an outbound
