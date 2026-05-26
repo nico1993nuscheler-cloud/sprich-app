@@ -78,7 +78,28 @@ final class HistoryStore: ObservableObject {
             let mem = ModelConfiguration(isStoredInMemoryOnly: true)
             container = try! ModelContainer(for: HistoryEntry.self, configurations: mem)
         }
-        reload()
+        // P1-BUG-01 (v1.0.8 hotfix): do NOT call `reload()` synchronously
+        // from init(). `reload()` assigns to `@Published var entries`; if
+        // init() runs on the same run-loop tick that a SwiftUI view first
+        // accesses `.shared` (which previously happened via `@StateObject`
+        // in `HomeSection`), the publish fires during a view-update pass
+        // and SwiftUI emits "Publishing changes from within view updates
+        // is not allowed". That, in turn, made `NavigationSplitView`
+        // reassert column visibility and collapse the Settings sidebar.
+        //
+        // Defer the first load to the next main-loop tick so it always
+        // lands AFTER any in-flight render pass completes. `entries`
+        // starts as `[]`, so views render an empty/loading state for one
+        // tick before the real rows pop in — imperceptible in practice.
+        DispatchQueue.main.async { [weak self] in
+            #if DEBUG
+            print("[Sprich][P1-BUG-01] HistoryStore deferred-init reload firing")
+            #endif
+            self?.reload()
+        }
+        #if DEBUG
+        print("[Sprich][P1-BUG-01] HistoryStore.init complete — deferred reload queued")
+        #endif
     }
 
     /// Re-fetch all entries, newest first. Called after every mutation
@@ -87,7 +108,11 @@ final class HistoryStore: ObservableObject {
         let descriptor = FetchDescriptor<HistoryEntry>(
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
-        entries = (try? container.mainContext.fetch(descriptor)) ?? []
+        let fetched = (try? container.mainContext.fetch(descriptor)) ?? []
+        #if DEBUG
+        print("[Sprich][P1-BUG-01] HistoryStore.reload — fetched \(fetched.count) entries (was \(entries.count))")
+        #endif
+        entries = fetched
     }
 
     /// Append a new dictation record. Called from `PipelineCoordinator`

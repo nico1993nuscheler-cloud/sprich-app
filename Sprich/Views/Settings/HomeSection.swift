@@ -5,6 +5,13 @@ import AppKit
 /// window of dictations, text-only, click-to-copy, search-by-text.
 /// No audio persistence. Lives at the top of the sidebar.
 struct HomeSection: View {
+    // P1-BUG-01 (v1.0.8 hotfix): kept as @StateObject. Switching to
+    // @ObservedObject for "correctness with a singleton" actually broke
+    // NavigationSplitView's detail rendering (entire detail column went
+    // blank on mount). @StateObject works fine here in practice — the
+    // real bug was HistoryStore.init() publishing to @Published.entries
+    // synchronously during the first view render. Fixed there by deferring
+    // the initial reload() to DispatchQueue.main.async.
     @StateObject private var store = HistoryStore.shared
 
     @State private var query: String = ""
