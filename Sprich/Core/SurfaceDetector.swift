@@ -45,6 +45,10 @@ enum SurfaceDetector {
     /// Ask a browser (via AppleScript) for the URL of its frontmost tab.
     /// Returns `nil` on any failure — denied TCC permission, scripting
     /// not supported, browser not running, timeout.
+    ///
+    /// On failure a one-line diagnostic is logged so a user testing the
+    /// destination-aware Formal mode can tell apart "TCC permission denied
+    /// for Sprich → <Browser>" from "host not in the mapping table".
     private static func readActiveTabURL(browserBundleID: String) async -> String? {
         let script = appleScriptForBrowser(bundleID: browserBundleID)
         guard let script = script else { return nil }
@@ -53,7 +57,14 @@ enum SurfaceDetector {
             var errorInfo: NSDictionary?
             guard let nsScript = NSAppleScript(source: script) else { return nil }
             let descriptor = nsScript.executeAndReturnError(&errorInfo)
-            if errorInfo != nil { return nil }
+            if let errorInfo {
+                #if DEBUG
+                let code = (errorInfo[NSAppleScript.errorNumber] as? Int) ?? 0
+                let msg  = (errorInfo[NSAppleScript.errorMessage] as? String) ?? "?"
+                print("[Sprich][Surface] AppleScript tab-URL read failed for \(browserBundleID) — code=\(code) msg=\(msg) (likely TCC denied; grant Sprich → \(browserBundleID) in System Settings → Privacy & Security → Automation)")
+                #endif
+                return nil
+            }
             let raw = descriptor.stringValue?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard let raw, !raw.isEmpty else { return nil }

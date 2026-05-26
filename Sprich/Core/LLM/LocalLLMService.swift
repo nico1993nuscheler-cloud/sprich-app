@@ -37,6 +37,15 @@ actor LocalLLMService {
     private var loadingTask: Task<Void, Error>?
     private var lastUsedAt: Date = .distantPast
 
+    /// True while a `cleanup()` call is awaiting `client.generateText`.
+    /// Swift actors are re-entrant on `await`, so this explicit guard is
+    /// required even though `LocalLLMService` is an actor — without it,
+    /// two concurrent cleanup() calls hit llama.cpp's `generateText` at
+    /// the same time and crash in `LocalLLMClientLlama/Batch.swift:20
+    /// Unexpectedly found nil`. Mutable actor state IS preserved across
+    /// the actor's own await points, so a simple bool is sufficient.
+    private var isGenerating = false
+
     /// 5-minute idle threshold per scoping Decision 6. Public for tests.
     static let idleUnloadInterval: TimeInterval = 5 * 60
 
@@ -121,12 +130,27 @@ actor LocalLLMService {
             #endif
 
             let parameter = LlamaClient.Parameter(
-                // 2048 covers Sprich's max realistic input (a few minutes
-                // of dictation cleaned by a short prompt) with margin.
-                context: 2048,
-                // 0.3 matches the cloud LLM call site so cloud/local
-                // behavior parity isn't just prompts.
-                temperature: 0.3,
+                // 4096 covers Sprich's worst-case Formal-mode budget:
+                // ~530 tokens of system prompt (hardened anti-instruction
+                // wording shipped 2026-05-26) + ~160 tokens of destination
+                // hint (longest is aiChat/taskManager) + multi-minute
+                // dictation + headroom for the model to over-generate
+                // before the "no preamble or commentary" rule kicks in.
+                // Prior 2048 cap caused `context size exceeded[2048 < N]`
+                // crashes once both the new system prompt and a long
+                // dictation were in play. Gemma 3 1B supports 32k natively;
+                // ~20MB extra KV cache for 4k is a cheap fix.
+                context: 4096,
+                // 0.0 (greedy decoding) — Sprich is a text polisher, not a
+                // creative writing tool. Same input must produce same output;
+                // sampling at 0.3 caused two identical dictations to yield
+                // different LLM outputs, which is the wrong behavior for a
+                // transcription-cleanup product. Greedy also tends to follow
+                // long structured prompts (formal-mode rules + destination
+                // hints) more reliably on a 1B-parameter model than sampling
+                // does. Cloud providers are pinned to 0 in `LLMService.swift`
+                // for the same reason.
+                temperature: 0.0,
                 topK: 40,
                 topP: 0.95,
                 options: .init(
@@ -202,6 +226,16 @@ actor LocalLLMService {
         guard let client else {
             throw SprichError.localLLMNotReady("Model failed to load. Check Settings → Providers → Local LLM, or switch to a cloud provider.")
         }
+
+        // Concurrent-generation guard — see `isGenerating` doc above.
+        // PipelineCoordinator already drops new dictations while .processing,
+        // so reaching here with isGenerating=true should be impossible in
+        // normal flow. This is defense-in-depth.
+        if isGenerating {
+            throw SprichError.localLLMNotReady("Sprich is still finishing the previous dictation. Please wait a moment and try again.")
+        }
+        isGenerating = true
+        defer { isGenerating = false }
 
         let input = LLMInput.chat([
             .system(systemPrompt),

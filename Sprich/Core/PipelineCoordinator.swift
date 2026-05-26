@@ -147,6 +147,25 @@ class PipelineCoordinator {
         print("[Sprich] startRecording(\(mode.displayName)) — status=\(appState.status)")
         #endif
 
+        // Refuse to start a new dictation while the previous one is still
+        // being post-processed (STT → LLM → paste). Without this guard,
+        // a fast hotkey re-press could start a fresh recording while the
+        // previous LLM call is mid-flight. Both calls then hit the local
+        // llama.cpp client concurrently — its batch state is NOT safe for
+        // concurrent generate() and crashes in
+        // `LocalLLMClientLlama/Batch.swift:20 Unexpectedly found nil`.
+        // Drop the request silently; the user can re-press once the paste
+        // lands. Belt-and-suspenders: `LocalLLMService.cleanup` also
+        // refuses concurrent generation, so even if this guard ever fails
+        // (e.g. status raced back to .ready before LLM finished), llama
+        // can't crash.
+        if case .processing = appState.status {
+            #if DEBUG
+            print("[Sprich] startRecording dropped — still processing previous dictation")
+            #endif
+            return
+        }
+
         // Trial / license gate (P1-PRD-08). Hard-lock per D4 — no
         // degraded mode at expiry, just point the user at the buy flow.
         if !TrialState.shared.isEntitled {
