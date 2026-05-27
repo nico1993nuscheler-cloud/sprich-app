@@ -28,6 +28,18 @@ struct HomeSection: View {
     }
 
     var body: some View {
+        // P1-BUG-01 (v1.0.9 fix): outer frame must NOT include
+        // `maxHeight: .infinity`. Every other Settings section uses just
+        // `.frame(maxWidth: .infinity, alignment: .topLeading)` — only
+        // HomeSection had `maxHeight: .infinity`, and that was the cause
+        // of the Settings sidebar collapsing on Home click. The infinite-
+        // height request inside NavigationSplitView's detail column
+        // triggered macOS's auto-collapse heuristic (decides the detail
+        // is "large enough" to deserve the whole window).
+        //
+        // The inner ScrollView still gets the available height because
+        // SettingsView's outer Group has its own `maxHeight: .infinity`
+        // (SettingsView.swift:121) and propagates it via topLeading.
         VStack(alignment: .leading, spacing: 0) {
             header
             searchAndActions
@@ -41,7 +53,7 @@ struct HomeSection: View {
                 entryList
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .alert("Clear all history?", isPresented: $confirmClear) {
             Button("Clear", role: .destructive) {
                 store.clearAll()

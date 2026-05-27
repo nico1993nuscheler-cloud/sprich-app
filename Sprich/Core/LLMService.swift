@@ -52,18 +52,25 @@ class LLMService {
     }
 
     /// Clean up transcribed text using the configured LLM provider.
+    ///
+    /// For Formal mode, `inputText` is Pass-1 (literal-cleaned) text —
+    /// `PipelineCoordinator` runs `polishLiteral` before calling here. The
+    /// LLM's output is gated by `FormalOutputGuard` against a sentence-
+    /// count contract; on breach we silently return `inputText` (the
+    /// Pass-1 baseline). Custom mode skips the guard — user-driven prompts
+    /// aren't held to the Formal contract. Literal mode never reaches
+    /// here (PipelineCoordinator pastes Pass-1 directly).
+    ///
     /// `surface` is the resolved destination (email / slack / docs / …)
     /// and is only applied when `mode == .formal` and
-    /// `settings.adaptToSurface == true`. Literal bypasses LLM entirely
-    /// and Custom is intentionally left untouched so user-authored
-    /// prompts aren't overridden.
+    /// `settings.adaptToSurface == true`.
     func cleanup(
-        rawText: String,
+        inputText: String,
         mode: TranscriptionMode,
         settings: AppSettings,
         surface: Surface = .generic
     ) async throws -> String {
-        let sanitizedText = InputSanitizer.sanitize(rawText)
+        let sanitizedText = InputSanitizer.sanitize(inputText)
 
         guard !sanitizedText.isEmpty else {
             throw SprichError.emptyTranscription
@@ -76,30 +83,45 @@ class LLMService {
             adaptToSurface: settings.adaptToSurface
         )
 
+        // Per-dictation output budget. The Formal Pass-2 contract is "polish,
+        // same sentence count ±1" — the model has no business writing a
+        // 1024-token essay from a 50-char input. Cap proportionally to input
+        // length, with headroom for register lift and a hard floor for very
+        // short dictations ("Thanks." → 82 tokens still leaves room).
+        let maxTokens = Self.budgetTokens(for: sanitizedText)
+
+        // Route to the configured provider. Local delegates to
+        // LocalLLMService which runs its own guard internally; cloud paths
+        // return the raw LLM string here and we wrap once at the bottom.
+        let rawLLMOutput: String
         switch settings.llmProvider {
         case .groq:
-            return try await callGroqLLM(
+            rawLLMOutput = try await callGroqLLM(
                 systemPrompt: systemPrompt,
                 userMessage: sanitizedText,
-                model: settings.groqLLMModel
+                model: settings.groqLLMModel,
+                maxTokens: maxTokens
             )
         case .claude:
-            return try await callClaude(
+            rawLLMOutput = try await callClaude(
                 systemPrompt: systemPrompt,
                 userMessage: sanitizedText,
-                model: settings.claudeModel
+                model: settings.claudeModel,
+                maxTokens: maxTokens
             )
         case .google:
-            return try await callGemini(
+            rawLLMOutput = try await callGemini(
                 systemPrompt: systemPrompt,
                 userMessage: sanitizedText,
-                model: settings.googleModel
+                model: settings.googleModel,
+                maxTokens: maxTokens
             )
         case .openai:
-            return try await callOpenAI(
+            rawLLMOutput = try await callOpenAI(
                 systemPrompt: systemPrompt,
                 userMessage: sanitizedText,
-                model: settings.openAILLMModel
+                model: settings.openAILLMModel,
+                maxTokens: maxTokens
             )
         case .local:
             // On-device cleanup via llama.cpp + Gemma 3 1B-it Q4_K_M.
@@ -107,16 +129,45 @@ class LLMService {
             // — if `LocalLLMService` fails, the error surfaces to the user
             // and Settings is the only path back to a cloud provider.
             //
-            // Pass `rawText` not `sanitizedText` — `LocalLLMService.cleanup`
-            // runs its own `InputSanitizer.sanitize`, and we don't want the
-            // local path to be a thin shim over already-sanitized text.
+            // LocalLLMService applies FormalOutputGuard internally, so we
+            // return its result directly without re-wrapping.
             return try await LocalLLMService.shared.cleanup(
-                rawText: rawText,
+                inputText: inputText,
                 mode: mode,
                 settings: settings,
                 surface: surface
             )
         }
+
+        // Cloud post-processing. Formal mode enforces the sentence-count
+        // contract; non-Formal modes (Custom) only get artifact cleanup.
+        if mode == .formal {
+            let result = FormalOutputGuard.enforce(
+                pass1Text: sanitizedText,
+                rawLLMOutput: rawLLMOutput,
+                language: settings.preferredLanguage
+            )
+            #if DEBUG
+            if result.usedFallback {
+                print("[Sprich] Formal guard fallback (cloud): \(result.fallbackReason ?? "?")")
+            }
+            #endif
+            return result.text
+        } else {
+            let cleaned = FormalOutputGuard.stripWrappingQuotes(
+                FormalOutputGuard.stripPreamble(rawLLMOutput)
+            )
+            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// Per-call output cap: `min(1024, (input_chars / 3) + 80)`. Floor of
+    /// ~82 tokens covers single-sentence dictations; cap at 1024 keeps
+    /// long multi-paragraph dictations workable. Stops the model from
+    /// emitting a runaway list when the dictation is one question.
+    static func budgetTokens(for inputText: String) -> Int {
+        let estimate = (inputText.count / 3) + 80
+        return min(1024, max(estimate, 80))
     }
 
     // MARK: - Groq LLM (fastest — reuses STT API key)
@@ -124,7 +175,8 @@ class LLMService {
     private func callGroqLLM(
         systemPrompt: String,
         userMessage: String,
-        model: String
+        model: String,
+        maxTokens: Int
     ) async throws -> String {
         // Reuse the Groq STT key — same account, same key
         guard let apiKey = KeychainManager.retrieve(key: STTProviderType.groq.keychainKey) else {
@@ -147,7 +199,7 @@ class LLMService {
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userMessage]
             ],
-            "max_tokens": 1024,
+            "max_tokens": maxTokens,
             // 0.0 — see comment in `LocalLLMService.swift` re: greedy decoding.
             // Sprich polishes text; sampling produced inconsistent outputs
             // (same input → different output) which is wrong for this product.
@@ -191,7 +243,8 @@ class LLMService {
     private func callClaude(
         systemPrompt: String,
         userMessage: String,
-        model: String
+        model: String,
+        maxTokens: Int
     ) async throws -> String {
         guard let apiKey = KeychainManager.retrieve(key: LLMProviderType.claude.keychainKey) else {
             throw SprichError.missingAPIKey("Anthropic")
@@ -210,7 +263,7 @@ class LLMService {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": maxTokens,
             // 0.0 — same rationale as Groq above. Anthropic default is 1.0;
             // an unset temperature gave wildly varying polish outputs.
             "temperature": 0.0,
@@ -254,7 +307,8 @@ class LLMService {
     private func callGemini(
         systemPrompt: String,
         userMessage: String,
-        model: String
+        model: String,
+        maxTokens: Int
     ) async throws -> String {
         guard let apiKey = KeychainManager.retrieve(key: LLMProviderType.google.keychainKey) else {
             throw SprichError.missingAPIKey("Google")
@@ -291,7 +345,7 @@ class LLMService {
                 ]
             ],
             "generationConfig": [
-                "maxOutputTokens": 1024,
+                "maxOutputTokens": maxTokens,
                 // 0.0 — same rationale as Groq/Claude above.
                 "temperature": 0.0,
             ]
@@ -337,7 +391,8 @@ class LLMService {
     private func callOpenAI(
         systemPrompt: String,
         userMessage: String,
-        model: String
+        model: String,
+        maxTokens: Int
     ) async throws -> String {
         guard let apiKey = KeychainManager.retrieve(key: LLMProviderType.openai.keychainKey) else {
             throw SprichError.missingAPIKey("OpenAI")
@@ -359,7 +414,7 @@ class LLMService {
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userMessage]
             ],
-            "max_tokens": 1024,
+            "max_tokens": maxTokens,
             // 0.0 — OpenAI default is 1.0; same rationale as the other
             // providers above (deterministic polishing, not creative writing).
             "temperature": 0.0,

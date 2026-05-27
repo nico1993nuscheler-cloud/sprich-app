@@ -26,6 +26,7 @@
 		A10000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000017 /* Assets.xcassets */; };
 		A10000047 /* NOTICE.txt in Resources */ = {isa = PBXBuildFile; fileRef = B10000048 /* NOTICE.txt */; };
 		A10000051 /* LocalLLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000050 /* LocalLLMService.swift */; };
+		A10000069 /* FormalOutputGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000069 /* FormalOutputGuard.swift */; };
 		A10000060 /* ProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000060 /* ProviderCard.swift */; };
 		A10000061 /* MissingKeyBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000061 /* MissingKeyBanner.swift */; };
 		A10000062 /* StbImageStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000062 /* StbImageStubs.swift */; };
@@ -117,6 +118,7 @@
 		B10000047 /* NetworkStatusIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkStatusIndicator.swift; sourceTree = "<group>"; };
 		B10000048 /* NOTICE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = NOTICE.txt; sourceTree = "<group>"; };
 		B10000050 /* LocalLLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMService.swift; sourceTree = "<group>"; };
+		B10000069 /* FormalOutputGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormalOutputGuard.swift; sourceTree = "<group>"; };
 		B10000060 /* ProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/ProviderCard.swift; sourceTree = "<group>"; };
 		B10000061 /* MissingKeyBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissingKeyBanner.swift; sourceTree = "<group>"; };
 		B10000062 /* StbImageStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StbImageStubs.swift; sourceTree = "<group>"; };
@@ -201,6 +203,7 @@
 				B10000044 /* SystemPromptCatalog.swift */,
 				B10000045 /* LLMModelManager.swift */,
 				B10000050 /* LocalLLMService.swift */,
+				B10000069 /* FormalOutputGuard.swift */,
 			);
 			path = LLM;
 			sourceTree = "<group>";
@@ -409,6 +412,7 @@
 				A10000045 /* LLMModelDownloadView.swift in Sources */,
 				A10000046 /* NetworkStatusIndicator.swift in Sources */,
 				A10000051 /* LocalLLMService.swift in Sources */,
+				A10000069 /* FormalOutputGuard.swift in Sources */,
 				A10000060 /* ProviderCard.swift in Sources */,
 				A10000061 /* MissingKeyBanner.swift in Sources */,
 				A10000062 /* StbImageStubs.swift in Sources */,

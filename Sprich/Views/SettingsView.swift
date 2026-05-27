@@ -120,6 +120,14 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        // P1-BUG-01 (v1.0.9 fix): force `.balanced` style on macOS to keep
+        // sidebar + detail both visible at all times. Default `.automatic`
+        // style silently flips to `.prominentDetail` (sidebar collapsed)
+        // for certain detail-pane content shapes — specifically HomeSection
+        // mounting was triggering that flip with no recovery affordance
+        // (window has no toggle button), stranding the user.
+        // `.balanced` is the explicit "always show both columns" policy.
+        .navigationSplitViewStyle(.balanced)
         .frame(width: 820, height: 640)
         .onReceive(NotificationCenter.default.publisher(for: .sprichOpenSettingsSection)) { note in
             if let raw = note.userInfo?["section"] as? String,
@@ -974,12 +982,12 @@ private struct AIModelsSection: View {
                     isLocalSelected: appState.settings.sttProvider.isLocal,
                     cloudTitle: "Cloud",
                     cloudIcon: "cloud",
-                    cloudSubtitle: "API Key required / Fastest response time",
+                    cloudSubtitle: "Fastest / Highest quality / API key required",
                     cloudDescription: "Audio sent to chosen provider for transcription.",
                     localTitle: "On this Mac",
                     localIcon: "laptopcomputer",
-                    localSubtitle: "Private / No API Key",
-                    localDescription: "Runs fully on-device. Slightly slower.",
+                    localSubtitle: "Slower / Transcription fully on-device",
+                    localDescription: "One-time Whisper model download (~600 MB).",
                     onSelectCloud: selectCloudSTT,
                     onSelectLocal: selectLocalSTT
                 )
@@ -1066,12 +1074,12 @@ private struct AIModelsSection: View {
                     isLocalSelected: appState.settings.llmProvider.isLocal,
                     cloudTitle: "Cloud",
                     cloudIcon: "cloud",
-                    cloudSubtitle: "API Key required / Fastest response time",
-                    cloudDescription: "Transcribed text is sent to chosen provider for cleanup. No storage required.",
+                    cloudSubtitle: "Fastest / Highest quality / API key required",
+                    cloudDescription: "Transcribed text sent to chosen provider for cleanup. No storage.",
                     localTitle: "On this Mac",
                     localIcon: "laptopcomputer",
-                    localSubtitle: "Private / No API Key",
-                    localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
+                    localSubtitle: "Slower / Cleanup fully on-device",
+                    localDescription: "One-time Gemma download (~0.8 GB) + hardware checks.",
                     onSelectCloud: selectCloudLLM,
                     onSelectLocal: selectLocalLLM
                 )
