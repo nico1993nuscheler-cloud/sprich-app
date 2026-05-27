@@ -340,9 +340,13 @@ class PipelineCoordinator {
     ) async throws -> String {
         let t0 = CFAbsoluteTimeGetCurrent()
 
+        // Formal now uses the same Whisper bias as Literal: ship the
+        // punctuation hint so Whisper does the punctuation/capitalization
+        // work upstream. Pass 1 of the two-pass Formal pipeline is exactly
+        // the Literal-mode output, so the bias must match.
         let whisperPrompt = TextPostProcessor.whisperBiasPrompt(
             glossaryTerms: appState.settings.glossaryTerms,
-            includePunctuationHint: (mode == .literal)
+            includePunctuationHint: (mode == .literal || mode == .formal)
         )
 
         // Surface resolution only for Formal+adaptToSurface. Kicked in
@@ -377,14 +381,21 @@ class PipelineCoordinator {
             replacements: appState.settings.glossaryReplacements
         )
 
+        // Pass 1 of the two-pass Formal pipeline — also the entire
+        // Literal-mode output. Custom mode bypasses Pass 1 so user-authored
+        // prompts can operate on the raw post-glossary text.
+        let pass1Text = (mode == .formal || mode == .literal)
+            ? TextPostProcessor.polishLiteral(corrected)
+            : corrected
+
         if mode == .literal {
-            return TextPostProcessor.polishLiteral(corrected)
+            return pass1Text
         }
 
-        RecordingOverlayController.shared.showTranscribedText(corrected)
+        RecordingOverlayController.shared.showTranscribedText(pass1Text)
         let surface = await surfaceTask?.value ?? .generic
         let finalText = try await llmService.cleanup(
-            rawText: corrected,
+            inputText: pass1Text,
             mode: mode,
             settings: appState.settings,
             surface: surface
@@ -432,10 +443,13 @@ class PipelineCoordinator {
             print("[Sprich] Audio export: \(Int((t1 - pipelineStart) * 1000))ms (\(audioData.count / 1024)KB)")
             #endif
 
-            // 2. Build Whisper bias prompt (glossary + punctuation hint for literal)
+            // 2. Build Whisper bias prompt. Formal shares Literal's
+            // punctuation hint so Whisper does the punctuation work
+            // upstream — Pass 1 of the two-pass Formal pipeline is the
+            // Literal-mode output, so the bias must match.
             let whisperPrompt = TextPostProcessor.whisperBiasPrompt(
                 glossaryTerms: appState.settings.glossaryTerms,
-                includePunctuationHint: (mode == .literal)
+                includePunctuationHint: (mode == .literal || mode == .formal)
             )
 
             // 3. Kick off surface resolution in parallel with STT — but
@@ -487,18 +501,26 @@ class PipelineCoordinator {
                 replacements: appState.settings.glossaryReplacements
             )
 
-            // 5. Mode-dependent processing
+            // 5. Pass 1 of the two-pass Formal pipeline — also the entire
+            // Literal-mode output. Custom mode bypasses Pass 1 so
+            // user-authored prompts can operate on the raw post-glossary
+            // text.
+            let pass1Text = (mode == .formal || mode == .literal)
+                ? TextPostProcessor.polishLiteral(corrected)
+                : corrected
+
             let finalText: String
 
             if mode == .literal {
-                // Literal: STT output + local polish — no LLM
-                finalText = TextPostProcessor.polishLiteral(corrected)
+                finalText = pass1Text
                 #if DEBUG
-                print("[Sprich] Literal mode — skipping LLM (local polish applied)")
+                print("[Sprich] Literal mode — skipping LLM (Pass 1 only)")
                 #endif
             } else {
-                // Formal + Custom: use LLM to restructure
-                RecordingOverlayController.shared.showTranscribedText(corrected)
+                // Formal + Custom: route through the LLM. Formal sends
+                // Pass-1 (literal-cleaned) text; Custom sends the raw
+                // post-glossary text untouched.
+                RecordingOverlayController.shared.showTranscribedText(pass1Text)
 
                 // Await the surface resolution launched before STT.
                 // `nil` when adaptToSurface is off → fall back to
@@ -511,7 +533,7 @@ class PipelineCoordinator {
                 #endif
 
                 finalText = try await llmService.cleanup(
-                    rawText: corrected,
+                    inputText: pass1Text,
                     mode: mode,
                     settings: appState.settings,
                     surface: surface

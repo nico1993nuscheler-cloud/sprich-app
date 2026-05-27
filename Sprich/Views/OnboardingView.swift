@@ -436,12 +436,12 @@ struct OnboardingView: View {
                 isLocalSelected: providerChoice.isLocal,
                 cloudTitle: "Cloud",
                 cloudIcon: "cloud",
-                cloudSubtitle: "API Key required / Fastest response time",
+                cloudSubtitle: "Fastest / Highest quality / API key required",
                 cloudDescription: "Audio sent to chosen provider for transcription.",
                 localTitle: "On this Mac",
                 localIcon: "laptopcomputer",
-                localSubtitle: "Private / No API Key",
-                localDescription: "Runs fully on-device. Slightly slower.",
+                localSubtitle: "Slower / Transcription fully on-device",
+                localDescription: "One-time Whisper model download (~600 MB).",
                 onSelectCloud: { providerChoice = .groq },
                 onSelectLocal: { providerChoice = .local }
             )
@@ -457,12 +457,12 @@ struct OnboardingView: View {
                 isLocalSelected: llmProviderChoice.isLocal,
                 cloudTitle: "Cloud",
                 cloudIcon: "cloud",
-                cloudSubtitle: "API Key required / Fastest response time",
-                cloudDescription: "Transcribed text is sent to chosen provider for cleanup. No storage required.",
+                cloudSubtitle: "Fastest / Highest quality / API key required",
+                cloudDescription: "Transcribed text sent to chosen provider for cleanup. No storage.",
                 localTitle: "On this Mac",
                 localIcon: "laptopcomputer",
-                localSubtitle: "Private / No API Key",
-                localDescription: "Requires Gemma model download. ~0.8 GB storage on your device + hardware requirements.",
+                localSubtitle: "Slower / Cleanup fully on-device",
+                localDescription: "One-time Gemma download (~0.8 GB) + hardware checks.",
                 onSelectCloud: { llmProviderChoice = .groq },
                 onSelectLocal: { llmProviderChoice = .local }
             )

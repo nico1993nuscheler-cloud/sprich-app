@@ -49,6 +49,68 @@ actor LocalLLMService {
     /// 5-minute idle threshold per scoping Decision 6. Public for tests.
     static let idleUnloadInterval: TimeInterval = 5 * 60
 
+    /// Llama context window in tokens. Sized to comfortably hold:
+    ///   - Hardened Formal system prompt (~700 tokens for the longest
+    ///     localized variant, e.g. German)
+    ///   - Longest destination hint (`aiChat` / `taskManager`, ~160 tokens)
+    ///   - A multi-minute dictation (worst-case ~1500 tokens at 60 s of
+    ///     speech)
+    ///   - The model's pre-EOS output budget (`LLMService.budgetTokens`,
+    ///     capped at 1024)
+    ///   - Chat-template overhead + safety margin
+    ///
+    /// History: 2048 → 4096 (2026-05-26) → 8192 (2026-05-27). The 4096
+    /// bump still saw `context size exceeded[4096 < 4140]` on Formal +
+    /// email surface for a normal-length dictation; 8192 leaves ~3000
+    /// tokens of headroom in the worst observed case. Gemma 3 1B
+    /// supports 32k natively; ~80 MB extra KV cache is a cheap fix and
+    /// gets us out of the "tune the context every release" cycle.
+    static let contextSize: Int = 8192
+
+    /// Safety margin (tokens) reserved on top of the conservative
+    /// input+output token estimate when deciding whether a dictation
+    /// would overflow `contextSize`. Pads against char→token estimate
+    /// error and chat-template wrapping overhead.
+    static let contextSafetyMargin: Int = 256
+
+    /// Conservative chars-per-token divisor used to estimate token
+    /// counts from string lengths without paying for the BPE tokenizer.
+    /// 3.0 is below the empirical English (~3.8) and German (~3.5)
+    /// averages — under-estimating tokens would let us slip past the
+    /// pre-call overflow guard, so we err high (= more tokens per char).
+    static let tokensPerCharDivisor: Int = 3
+
+    /// Char-per-token multiplier for converting `LLMService.budgetTokens`
+    /// (an output token budget) into a streaming char budget. 4 matches
+    /// the OUTPUT side average (model tokens are typically slightly
+    /// longer than input tokens for clean polished prose).
+    static let charsPerOutputToken: Int = 4
+
+    /// Pass-1 character count below which Formal mode skips the local
+    /// LLM entirely and returns Pass-1 verbatim. The local Gemma 3 1B
+    /// at Q4_K_M cannot reliably distinguish "example phrase inside the
+    /// system prompt" from "actual user input" when the user input is
+    /// too short to ground the model — observed 2026-05-27, where
+    /// "Thanks." (7 chars) and "Thank you." (10 chars) both produced
+    /// the identical hallucinated 65-char string "Please suggest five
+    /// launch tagline ideas for a Mac dictation app." (the model
+    /// locked onto the tagline example in the Formal system prompt).
+    ///
+    /// `TextPostProcessor.polishLiteral` (Pass-1) already capitalises
+    /// the first letter and adds terminal punctuation, which is the
+    /// entire useful polish for ack-style inputs — so skipping the LLM
+    /// loses zero quality and removes the hallucination surface.
+    ///
+    /// 25 chars: above all common acks/greetings ("Sounds good to me.",
+    /// "I'll be there soon.") and below the German Slogans trap
+    /// (38 chars) so that case still exercises the language-drift
+    /// and length-ratio guards.
+    ///
+    /// Local-only: cloud providers (Groq Llama 70B, Claude, GPT-4o)
+    /// handle short inputs reliably and aren't subject to this
+    /// example-bleed failure mode.
+    static let shortInputBypassChars: Int = 25
+
     private init() {
         Task { [weak self] in
             await self?.installPrewarmHook()
@@ -130,17 +192,9 @@ actor LocalLLMService {
             #endif
 
             let parameter = LlamaClient.Parameter(
-                // 4096 covers Sprich's worst-case Formal-mode budget:
-                // ~530 tokens of system prompt (hardened anti-instruction
-                // wording shipped 2026-05-26) + ~160 tokens of destination
-                // hint (longest is aiChat/taskManager) + multi-minute
-                // dictation + headroom for the model to over-generate
-                // before the "no preamble or commentary" rule kicks in.
-                // Prior 2048 cap caused `context size exceeded[2048 < N]`
-                // crashes once both the new system prompt and a long
-                // dictation were in play. Gemma 3 1B supports 32k natively;
-                // ~20MB extra KV cache for 4k is a cheap fix.
-                context: 4096,
+                // See `Self.contextSize` for the sizing rationale and
+                // the 2048 → 4096 → 8192 history.
+                context: Self.contextSize,
                 // 0.0 (greedy decoding) — Sprich is a text polisher, not a
                 // creative writing tool. Same input must produce same output;
                 // sampling at 0.3 caused two identical dictations to yield
@@ -189,15 +243,35 @@ actor LocalLLMService {
     /// Drop-in replacement for `LLMService.cleanup` — same signature, same
     /// prompt-composition path, same surface-hint integration. The provider
     /// switch in `LLMService` routes to this for `.local`.
+    ///
+    /// For Formal mode, `inputText` is Pass-1 (literal-cleaned) text —
+    /// `PipelineCoordinator` runs `polishLiteral` before calling here. For
+    /// Custom mode it is the post-glossary STT result. Formal output is
+    /// gated by `FormalOutputGuard` against a sentence-count contract; on
+    /// breach we silently return `inputText` (the Pass-1 baseline).
     func cleanup(
-        rawText: String,
+        inputText: String,
         mode: TranscriptionMode,
         settings: AppSettings,
         surface: Surface = .generic
     ) async throws -> String {
-        let sanitizedText = InputSanitizer.sanitize(rawText)
+        let sanitizedText = InputSanitizer.sanitize(inputText)
         guard !sanitizedText.isEmpty else {
             throw SprichError.emptyTranscription
+        }
+
+        // Short-input bypass — see `shortInputBypassChars` doc above for
+        // the full rationale. On Formal mode, very short Pass-1 inputs
+        // ("Thanks.", "Thank you.", "Got it.") are NOT sent to the local
+        // LLM because Gemma 3 1B reliably hallucinates the in-prompt
+        // tagline example for short user inputs. Pass-1 already handles
+        // capitalization + terminal punctuation, which is the entire
+        // useful polish at this length.
+        if mode == .formal, sanitizedText.count < Self.shortInputBypassChars {
+            #if DEBUG
+            print("[Sprich] Formal guard fallback (local): short-input bypass (\(sanitizedText.count) chars < \(Self.shortInputBypassChars))")
+            #endif
+            return sanitizedText
         }
 
         // Compose the base system prompt for the active mode + language
@@ -242,19 +316,114 @@ actor LocalLLMService {
             .user(sanitizedText)
         ])
 
+        // Pre-call context-budget guard. llama.cpp throws
+        // `LLMError.failedToDecode("context size exceeded[N < M]")` when
+        // a decode tries to grow the KV cache past `contextSize`, and on
+        // the FOLLOWING dictation can crash with a `fatalError` in
+        // `LocalLLMClientLlama/Batch.swift:20 Unexpectedly found nil`
+        // because the context isn't reliably reset by the library after
+        // a decode-time throw. Both observed 2026-05-27 on Formal +
+        // email surface.
+        //
+        // For Formal mode we fall back to Pass-1 silently so the user
+        // still gets the literal cleanup — same UX as any other guard
+        // fallback. Custom mode has no Pass-1 to fall back to, so we
+        // surface a clean error rather than mute it.
+        let inputCharsEstimate = systemPrompt.count + sanitizedText.count
+        let inputTokensEstimate = inputCharsEstimate / Self.tokensPerCharDivisor
+        let outputTokenBudget = LLMService.budgetTokens(for: sanitizedText)
+        let neededContext = inputTokensEstimate + outputTokenBudget + Self.contextSafetyMargin
+        if neededContext > Self.contextSize {
+            #if DEBUG
+            print("[Sprich] Formal guard fallback (local): pre-call context overflow (need ~\(neededContext) tokens, have \(Self.contextSize))")
+            #endif
+            if mode == .formal {
+                return sanitizedText
+            } else {
+                throw SprichError.localLLMNotReady("Dictation too long for the local model right now. Try shorter, or switch to a cloud provider in Settings.")
+            }
+        }
+
         lastUsedAt = Date()
 
-        let raw = try await client.generateText(from: input)
+        // Stream tokens with a hard char-budget early-stop. Without this,
+        // when the 1B model decides a dictation warrants a 9-sentence
+        // list (the tagline trap on test #2, 2026-05-27), it ran for
+        // 11.5 s before the post-call sentence-count guard rejected it.
+        // The stream is short-circuited well before that — the Generator
+        // gets deinit'd when the for-await exits via `break`, which
+        // halts further llama.cpp decode steps.
+        //
+        // The library's `extraEOSTokens` stops (`<end_of_turn>` /
+        // `<start_of_turn>`) handle the normal "model finishes cleanly"
+        // case. The char budget catches runaway generation only.
+        let charBudget = outputTokenBudget * Self.charsPerOutputToken
+        var raw = ""
+        var earlyStopped = false
+        do {
+            let generator = try client.textStream(from: input)
+            for try await chunk in generator {
+                raw += chunk
+                if raw.count > charBudget {
+                    #if DEBUG
+                    print("[Sprich][LocalLLM] early-stop at \(raw.count) chars (budget=\(charBudget))")
+                    #endif
+                    earlyStopped = true
+                    break
+                }
+            }
+        } catch {
+            // The library's context can land in an inconsistent state
+            // after a mid-decode throw — the next dictation then hits a
+            // `fatalError` in `Batch.swift:20`. Drop the client so the
+            // next call lazy-reloads from a clean state. ~520 ms
+            // re-load cost vs. an app crash is the right tradeoff.
+            #if DEBUG
+            print("[Sprich][LocalLLM] generation error, unloading client: \(error)")
+            #endif
+            unload()
+            scheduleBackgroundPrewarm()
+            throw error
+        }
 
-        // Strip the known artifacts the 1B model occasionally emits
-        // despite the "no preamble or commentary" prompt directive.
-        // Two-stage pipeline (order matters):
-        //   1. Strip meta-paragraph / single-line preambles
-        //   2. Strip whole-output wrapping quotes (the 1B model sometimes
-        //      treats its output as "the rewritten quote" and wraps it
-        //      in curly quotation marks — QA 2026-05-18).
-        let cleaned = Self.stripWrappingQuotes(Self.stripPreamble(raw))
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Breaking out of the for-await loop mid-generation leaves the
+        // llama.cpp context in a half-decoded state — the iterator goes
+        // out of scope but the underlying KV cache is not reset, and the
+        // NEXT call to `client.textStream(...)` hits a
+        // `Batch.swift:20: Unexpectedly found nil` fatalError on the
+        // poisoned context. Natural EOS (the model emits its end-of-text
+        // token and the for-await exits without `break`) is clean — the
+        // library handles that path correctly. So we unload only on
+        // early-stop. Kick a background prewarm so the user's next
+        // dictation doesn't pay the cold-load latency.
+        if earlyStopped {
+            unload()
+            scheduleBackgroundPrewarm()
+        }
+
+        // Formal mode: enforce the two-pass contract (sentence count
+        // within ±1 of Pass 1, non-empty after artifact cleanup). On
+        // breach the guard returns `sanitizedText` (== Pass 1) silently.
+        // Custom mode is user-driven — no contract to enforce, just run
+        // the same artifact cleanup as before.
+        if mode == .formal {
+            let result = FormalOutputGuard.enforce(
+                pass1Text: sanitizedText,
+                rawLLMOutput: raw,
+                language: settings.preferredLanguage
+            )
+            #if DEBUG
+            if result.usedFallback {
+                print("[Sprich] Formal guard fallback (local): \(result.fallbackReason ?? "?")")
+            }
+            #endif
+            return result.text
+        } else {
+            let cleaned = FormalOutputGuard.stripWrappingQuotes(
+                FormalOutputGuard.stripPreamble(raw)
+            )
+            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     /// Resolve the on-disk file via `LLMModelManager` and call `prewarm`.
@@ -267,6 +436,31 @@ actor LocalLLMService {
             throw SprichError.localLLMNotReady("Local model not downloaded. Open Settings → Providers → Local LLM to download.")
         }
         try await prewarm(spec: spec, modelFile: modelFile)
+    }
+
+    /// Re-prewarm the default-spec model in the background after a
+    /// post-cleanup `unload()` (early-stop or generation throw). The
+    /// user's NEXT dictation can then hit a warm client even though
+    /// the previous one poisoned the context. Idempotent — `prewarm`
+    /// short-circuits if the client is already loaded.
+    private func scheduleBackgroundPrewarm() {
+        let spec = LocalLLMModelSpec.defaultSpec
+        Task.detached(priority: .userInitiated) {
+            let modelFile = await MainActor.run {
+                LLMModelManager.shared.existingFile(for: spec)
+            }
+            guard let modelFile else { return }
+            do {
+                try await LocalLLMService.shared.prewarm(spec: spec, modelFile: modelFile)
+                #if DEBUG
+                print("[Sprich][LocalLLM] background reprewarm ✅")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Sprich][LocalLLM] background reprewarm failed: \(error)")
+                #endif
+            }
+        }
     }
 
     /// Drops the client and frees the model arenas. Triggered on the
@@ -338,143 +532,4 @@ actor LocalLLMService {
         }
     }
 
-    // MARK: - Preamble stripper
-
-    /// Gemma 3 1B occasionally generates a conversational opener before
-    /// (or instead of) the cleaned text, despite the prompt's "no preamble"
-    /// directive. Two failure modes observed:
-    ///
-    /// **Mode A — single-line preamble flush against content:**
-    ///   `"Here is the rewritten text: Sehr geehrter Herr Müller,…"`
-    ///   Handled by `preambleExactPrefixes`.
-    ///
-    /// **Mode B — meta-conversation paragraph followed by `\n\n` + content:**
-    ///   `"Please provide the text you would like me to rewrite.\n\nHello,…"`
-    ///   Reported by QA 2026-05-18. Handled by paragraph-split + meta-marker
-    ///   check below.
-    ///
-    /// We stay strict about what counts as meta:
-    /// - Bounded to dropping AT MOST the first paragraph
-    /// - First paragraph must be SHORT (< 120 chars — real dictation
-    ///   paragraphs are usually longer)
-    /// - Must contain at least one of the narrow `metaParagraphMarkers`
-    ///   that we never expect to see at the start of real dictation
-    /// - There must be a second paragraph (single-paragraph outputs are
-    ///   never stripped, even if they happen to mention "please")
-
-    private static let preambleExactPrefixes: [String] = [
-        "Here is the rewritten text:",
-        "Here's the rewritten text:",
-        "Here is the cleaned text:",
-        "Here's the cleaned text:",
-        "Hier ist der überarbeitete Text:",
-        "Hier ist der bereinigte Text:",
-        "Hier der überarbeitete Text:"
-    ]
-
-    /// Phrases that only appear when a small model is "talking to the user
-    /// about the task" rather than executing the task. Match is
-    /// case-insensitive and substring-based, applied only to the first
-    /// paragraph of a multi-paragraph output. Keep this list narrow —
-    /// false positives strip legitimate first-paragraph content.
-    private static let metaParagraphMarkers: [String] = [
-        "please provide",
-        "would like me to",
-        "what would you like",
-        "i'd be happy to",
-        "of course",
-        "sure!",
-        "sure,",
-        "okay,",
-        "okay!",
-        "got it",
-        "here is the rewritten",
-        "here's the rewritten",
-        "here is the cleaned",
-        "here's the cleaned",
-        "hier ist der",
-        "i can help you",
-        "let me know"
-    ]
-
-    static func stripPreamble(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Mode A — single-line exact-prefix strip.
-        for preamble in preambleExactPrefixes {
-            if trimmed.hasPrefix(preamble) {
-                let dropped = trimmed.dropFirst(preamble.count)
-                return String(dropped).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        // Mode B — meta-paragraph + blank line + real content.
-        let parts = trimmed.components(separatedBy: "\n\n")
-        if parts.count >= 2 {
-            let first = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let firstLower = first.lowercased()
-            if first.count < 120,
-               metaParagraphMarkers.contains(where: { firstLower.contains($0) }) {
-                return parts.dropFirst()
-                    .joined(separator: "\n\n")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        return trimmed
-    }
-
-    /// Strip whole-output wrapping quotation marks.
-    ///
-    /// Gemma 3 1B sometimes treats its own output as "the rewritten quote"
-    /// and wraps the entire cleaned text in curly double-quotes
-    /// (`\u{201C}…\u{201D}`) — QA 2026-05-18 saw this consistently on the
-    /// English Formal-mode cleanup of a short business note.
-    ///
-    /// Conservative rule:
-    /// - Strip ONLY if both first and last characters are quote-like
-    /// - Strip ONLY one outer pair (no recursive nesting)
-    /// - Require at least 3 chars between so we don't reduce `""` to `""`
-    /// - Covers straight ASCII, English curly, single quotes, French
-    ///   guillemets, German continental
-    ///
-    /// Safe cases that are NOT stripped:
-    /// - `He said "yes."`           — first char isn't a quote
-    /// - `"This is great," she said.` — last char isn't a quote
-    /// - `Said "great" then left.`  — neither end is a quote
-    ///
-    /// Edge case (acceptable):
-    /// - User dictates a single fully-quoted phrase, e.g. `"Hello world"` —
-    ///   gets stripped to `Hello world`. Rare in dictation; if it ever
-    ///   matters, the user can dictate the quotes explicitly or use
-    ///   Literal mode.
-    static func stripWrappingQuotes(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 3,
-              let first = trimmed.first,
-              let last = trimmed.last else {
-            return trimmed
-        }
-        let openers: Set<Character> = [
-            "\"",        // ASCII straight double
-            "\u{201C}",  // English left double curly
-            "'",         // ASCII straight single
-            "\u{2018}",  // English left single curly
-            "«",         // French left guillemet
-            "\u{201E}"   // German continental „
-        ]
-        let closers: Set<Character> = [
-            "\"",        // ASCII straight double
-            "\u{201D}",  // English right double curly
-            "'",         // ASCII straight single
-            "\u{2019}",  // English right single curly
-            "»",         // French right guillemet
-            "\u{201C}"   // German continental closing "
-        ]
-        guard openers.contains(first), closers.contains(last) else {
-            return trimmed
-        }
-        return String(trimmed.dropFirst().dropLast())
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }
