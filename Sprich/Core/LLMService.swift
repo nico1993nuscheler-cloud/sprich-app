@@ -148,7 +148,10 @@ class LLMService {
                 ["role": "user", "content": userMessage]
             ],
             "max_tokens": 1024,
-            "temperature": 0.3,
+            // 0.0 — see comment in `LocalLLMService.swift` re: greedy decoding.
+            // Sprich polishes text; sampling produced inconsistent outputs
+            // (same input → different output) which is wrong for this product.
+            "temperature": 0.0,
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -208,6 +211,9 @@ class LLMService {
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 1024,
+            // 0.0 — same rationale as Groq above. Anthropic default is 1.0;
+            // an unset temperature gave wildly varying polish outputs.
+            "temperature": 0.0,
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": userMessage]
@@ -286,7 +292,8 @@ class LLMService {
             ],
             "generationConfig": [
                 "maxOutputTokens": 1024,
-                "temperature": 0.3,
+                // 0.0 — same rationale as Groq/Claude above.
+                "temperature": 0.0,
             ]
         ]
 
@@ -353,6 +360,9 @@ class LLMService {
                 ["role": "user", "content": userMessage]
             ],
             "max_tokens": 1024,
+            // 0.0 — OpenAI default is 1.0; same rationale as the other
+            // providers above (deterministic polishing, not creative writing).
+            "temperature": 0.0,
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

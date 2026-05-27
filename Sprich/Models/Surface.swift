@@ -12,6 +12,8 @@ enum Surface: String, Codable, Equatable, CaseIterable {
     case discord
     case messages
     case docs
+    case aiChat
+    case taskManager
     case generic
 
     /// Short prompt fragment appended to the Formal-mode system prompt.
@@ -20,19 +22,83 @@ enum Surface: String, Codable, Equatable, CaseIterable {
     var promptHint: String {
         switch self {
         case .email:
-            return "Destination: email. Write a complete email: greeting, body, sign-off. Keep paragraphs. No emoji."
+            return """
+                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. Keep paragraph breaks. No emoji.
+
+                The email scaffolding (greeting + sign-off) wraps the polished dictation. The dictation itself is the body content — NEVER answered, NEVER expanded, NEVER fulfilled. A dictated question becomes a question asked in the email. A dictated request becomes a request made in the email.
+
+                Voice example (request stays a request):
+                  INPUT:  "hey can you send over the Q3 numbers by Friday thanks"
+                  OUTPUT: "Hi,\n\nCould you please send over the Q3 numbers by Friday?\n\nThanks,"
+
+                Voice example (question stays a question — DO NOT answer it):
+                  INPUT:  "please can you give me five tagline ideas for my Mac dictation app"
+                  CORRECT: "Hi,\n\nI hope you're well. Could you please suggest five tagline ideas for my Mac dictation app?\n\nThanks for your help,"
+                  WRONG (do NOT do this): "Greetings,\n\nI would be pleased to provide you with five tagline ideas: 1. Unlock Clarity… 2. Precision Dictation… [etc]\n\nSincerely,\n[Your Name]"
+
+                Use "[Your Name]" or similar placeholders ONLY if the user dictated a sign-off explicitly. Otherwise leave the sign-off as just the closing phrase (e.g. "Thanks," or "Best,") with no name line.
+                """
         case .slack:
-            return "Destination: Slack. Terse, conversational, single paragraph, no greeting or sign-off. Markdown okay. Emoji only if the input clearly warrants it."
+            return """
+                Destination: Slack. Voice: clean conversational, terse, single paragraph, no greeting or sign-off. Markdown okay. Emoji only if the user clearly dictated one.
+                Voice example:
+                  INPUT:  "hey team uh just wanted to flag that the deploy is going out at like 3pm today"
+                  OUTPUT: "Heads up — deploy is going out at 3pm today."
+                """
         case .googleChat:
-            return "Destination: Google Chat. Short, professional, no greeting or sign-off, no emoji."
+            return """
+                Destination: Google Chat. Voice: short professional, no greeting or sign-off, no emoji.
+                Voice example:
+                  INPUT:  "um could you maybe take a look at the doc when you have a sec thanks"
+                  OUTPUT: "Could you take a look at the doc when you have a moment? Thanks."
+                """
         case .teams:
-            return "Destination: Microsoft Teams chat. Short, professional, single paragraph, no greeting or sign-off."
+            return """
+                Destination: Microsoft Teams chat. Voice: short professional, single paragraph, no greeting or sign-off.
+                Voice example:
+                  INPUT:  "hey just checking can you join the standup tomorrow"
+                  OUTPUT: "Quick check — can you join the standup tomorrow?"
+                """
         case .discord:
-            return "Destination: Discord. Casual, concise, single paragraph, no greeting or sign-off."
+            return """
+                Destination: Discord. Voice: casual, concise, single paragraph, no greeting or sign-off.
+                Voice example:
+                  INPUT:  "uh yeah so I think the new patch broke the build like everything fails now"
+                  OUTPUT: "I think the new patch broke the build — everything fails now."
+                """
         case .messages:
-            return "Destination: chat app. Casual, very short, no greeting or sign-off."
+            return """
+                Destination: chat app. Voice: casual, very short, no greeting or sign-off.
+                Voice example:
+                  INPUT:  "hey um can you grab milk on the way home thanks"
+                  OUTPUT: "Could you grab milk on the way home? Thanks."
+                """
         case .docs:
-            return "Destination: document. Clean prose, no greeting or sign-off, preserve structure."
+            return """
+                Destination: document. Voice: clean prose, no greeting or sign-off, preserve structure (paragraph breaks, lists if dictated).
+                """
+        case .aiChat:
+            return """
+                Destination: AI chat assistant (ChatGPT, Claude, Gemini, Perplexity, Copilot, etc.). Voice: tight, direct, imperative — NOT polite-formal. The user is writing a prompt FOR a machine to receive, not a message to a person. No "please", no "could you", no "would you mind" — those waste tokens and dilute the request. No greeting, no sign-off. Use imperative verbs ("Suggest", "Generate", "Summarize", "Explain", "Compare", "Write") or a sharp direct question. Preserve every specific detail the user dictated (numbers, names, file paths, code snippets, constraints) verbatim — those are usually load-bearing. If the user described multiple constraints, requirements, or examples, surface them as a bulleted list.
+
+                CRITICAL — your output is the PROMPT the user will send to the assistant. It is NOT a response to that prompt. If the dictation is "suggest five taglines", your output is "Suggest five taglines for X." — NOT a list of taglines.
+
+                Voice example (request becomes a clean prompt — NOT a response):
+                  INPUT:   "uh please I want can you give me like five launch tagline ideas for a Mac Dictation app that runs locally"
+                  CORRECT: "Suggest five launch tagline ideas for a Mac dictation app that runs locally."
+                  WRONG (do NOT do this): "Here are five tagline ideas: 1. Unlock Clarity… 2. Precision Dictation… [etc]"
+                """
+        case .taskManager:
+            return """
+                Destination: project-management or task tool (Notion, Linear, ClickUp, Asana, Jira, Trello, Todoist, Things, Monday, Basecamp, Height, etc.). Voice: imperative task description, not a message to a person. No greeting, no sign-off. Lead with an imperative verb (Add, Fix, Investigate, Implement, Refactor, Write, Review, Update, Migrate, …). If the user dictated context, acceptance criteria, sub-steps, or links, surface them as a bulleted list under the lead sentence. Keep prose tight — task descriptions get scanned, not read.
+
+                CRITICAL — your output is the TASK DESCRIPTION the user is writing, not the work itself. If the dictation is "implement OAuth login", your output is "Implement OAuth login." (the task) — NOT actual OAuth implementation code or instructions.
+
+                Voice example:
+                  INPUT:   "uh yeah we should probably like fix the login bug where users get logged out after 5 minutes on Safari"
+                  CORRECT: "Fix login bug: users get logged out after 5 minutes on Safari."
+                  WRONG (do NOT do this): a detailed write-up of how to fix the login bug.
+                """
         case .generic:
             return ""
         }
@@ -41,14 +107,16 @@ enum Surface: String, Codable, Equatable, CaseIterable {
     /// Human-readable label used in debug logs.
     var debugLabel: String {
         switch self {
-        case .email:      return "email"
-        case .slack:      return "slack"
-        case .googleChat: return "google-chat"
-        case .teams:      return "teams"
-        case .discord:    return "discord"
-        case .messages:   return "messages"
-        case .docs:       return "docs"
-        case .generic:    return "generic"
+        case .email:       return "email"
+        case .slack:       return "slack"
+        case .googleChat:  return "google-chat"
+        case .teams:       return "teams"
+        case .discord:     return "discord"
+        case .messages:    return "messages"
+        case .docs:        return "docs"
+        case .aiChat:      return "ai-chat"
+        case .taskManager: return "task-manager"
+        case .generic:     return "generic"
         }
     }
 }
@@ -82,8 +150,24 @@ enum SurfaceMapping {
         case "ru.keepcoder.Telegram",
              "org.telegram.desktop":                      return .messages
 
+        // AI chat assistants (native desktop apps)
+        case "com.openai.chat":                           return .aiChat
+        case "com.anthropic.claudefordesktop":            return .aiChat
+        case "ai.perplexity.mac",
+             "ai.perplexity.comet":                       return .aiChat
+
+        // Project-management / task tools (native desktop apps)
+        case "notion.id":                                 return .taskManager
+        case "com.linear":                                return .taskManager
+        case "com.todoist.mac.Todoist",
+             "com.todoist.Todoist":                       return .taskManager
+        case "com.culturedcode.ThingsMac":                return .taskManager
+        case "com.omnigroup.OmniFocus3",
+             "com.omnigroup.OmniFocus4":                  return .taskManager
+        case "com.electron.clickup",
+             "com.clickup.desktop":                       return .taskManager
+
         // Docs
-        case "notion.id":                                 return .docs
         case "com.apple.Pages":                           return .docs
         case "com.microsoft.Word":                        return .docs
 
@@ -115,11 +199,14 @@ enum SurfaceMapping {
         let path = url.path.lowercased()
 
         // Gmail: mail.google.com (also m.google.com redirects)
-        if host == "mail.google.com" { return .email }
+        if host == "mail.google.com" {
+            // Chat-in-Gmail path wins before the email fallback below.
+            if path.hasPrefix("/chat") { return .googleChat }
+            return .email
+        }
 
         // Google Chat: chat.google.com, and the Gmail-integrated chat path
         if host == "chat.google.com" { return .googleChat }
-        if host == "mail.google.com", path.hasPrefix("/chat") { return .googleChat }
 
         // Outlook web
         if host.hasSuffix("outlook.live.com") ||
@@ -141,9 +228,46 @@ enum SurfaceMapping {
            host.hasSuffix("signal.org") ||
            host.hasSuffix("messenger.com") { return .messages }
 
+        // AI chat assistants (web)
+        if host == "chatgpt.com" || host.hasSuffix(".chatgpt.com") ||
+           host == "chat.openai.com" { return .aiChat }
+        if host == "claude.ai" || host.hasSuffix(".claude.ai") ||
+           host == "claude.com" || host.hasSuffix(".claude.com") { return .aiChat }
+        if host == "gemini.google.com" || host == "aistudio.google.com" ||
+           host == "bard.google.com" { return .aiChat }
+        if host == "perplexity.ai" || host.hasSuffix(".perplexity.ai") { return .aiChat }
+        if host == "copilot.microsoft.com" { return .aiChat }
+        if host == "chat.deepseek.com" || host == "deepseek.com" ||
+           host.hasSuffix(".deepseek.com") { return .aiChat }
+        if host == "chat.mistral.ai" || host == "mistral.ai" { return .aiChat }
+        if host == "grok.com" || host.hasSuffix(".grok.com") ||
+           host == "x.ai"     || host.hasSuffix(".x.ai") { return .aiChat }
+        if host == "poe.com" || host.hasSuffix(".poe.com") { return .aiChat }
+        if host == "you.com" || host == "chat.you.com" { return .aiChat }
+        if host == "phind.com" { return .aiChat }
+
+        // Project-management / task tools (web).
+        // Notion is dual-use (wiki + DB); routed to task-manager per the
+        // most common dictation case. Atlassian's /wiki/ path is Confluence
+        // (docs), so split it explicitly before the Jira fallback.
+        if host.hasSuffix("notion.so") || host.hasSuffix("notion.site") { return .taskManager }
+        if host.hasSuffix("linear.app") { return .taskManager }
+        if host == "clickup.com" || host.hasSuffix(".clickup.com") { return .taskManager }
+        if host.hasSuffix("asana.com") { return .taskManager }
+        if host.hasSuffix("atlassian.net") {
+            if path.hasPrefix("/wiki") { return .docs }   // Confluence
+            return .taskManager                            // Jira
+        }
+        if host == "trello.com" || host.hasSuffix(".trello.com") { return .taskManager }
+        if host == "todoist.com" || host.hasSuffix(".todoist.com") { return .taskManager }
+        if host == "monday.com" || host.hasSuffix(".monday.com") { return .taskManager }
+        if host == "basecamp.com" || host.hasSuffix(".basecamp.com") ||
+           host.hasSuffix(".basecamphq.com") { return .taskManager }
+        if host == "height.app" || host.hasSuffix(".height.app") { return .taskManager }
+        if host.hasSuffix(".shortcut.com") || host == "app.shortcut.com" { return .taskManager }
+
         // Docs
         if host == "docs.google.com" { return .docs }
-        if host.hasSuffix("notion.so") || host.hasSuffix("notion.site") { return .docs }
 
         return nil
     }
