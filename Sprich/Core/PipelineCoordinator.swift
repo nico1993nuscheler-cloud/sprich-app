@@ -294,7 +294,8 @@ class PipelineCoordinator {
         RecordingOverlayController.shared.showProcessing()
 
         do {
-            let finalText = try await runPipeline(audioData: audioData, mode: mode)
+            let result = try await runPipeline(audioData: audioData, mode: mode)
+            let finalText = result.text
             // Append the "keep going" hint inline so it lands in the
             // same text field as the transcription. New line + hint
             // keeps it readable without a huge visual thump.
@@ -303,12 +304,18 @@ class PipelineCoordinator {
             await deliver(finalText + continuation)
             // Record the auto-stopped dictation into history too — only
             // the pre-continuation text, since the bracket is Sprich's
-            // own message, not user content.
+            // own message, not user content. v1.0.11: enrich targetApp
+            // with the browser brand name when known ("App — Brand");
+            // falls back to bare app name for Literal / native / TCC-denied.
             if interceptOutput == nil {
+                let label = WebSurfaceLabel.formatTargetApp(
+                    appName: capturedAppName,
+                    webHost: result.webHost
+                )
                 HistoryStore.shared.record(
                     text: finalText,
                     mode: mode,
-                    targetApp: capturedAppName
+                    targetApp: label
                 )
             }
         } catch {
@@ -330,14 +337,24 @@ class PipelineCoordinator {
         capturedAppName = nil
     }
 
+    /// Output of `runPipeline` — final cleaned text + (for browser
+    /// dictations) the resolved tab host so the caller can label the
+    /// History row "Google Chrome — Gmail". `webHost` is nil for Literal
+    /// mode, native apps, unsupported browsers, or failed reads.
+    struct PipelineResult {
+        let text: String
+        let webHost: String?
+    }
+
     /// The STT→glossary→(LLM or local polish) path, factored out of
     /// `stopAndProcess` so auto-stopped recordings can share it. Returns
-    /// the final cleaned text ready for paste. Does NOT paste — the
-    /// caller decides whether to paste the raw result or append a hint.
+    /// the final cleaned text + URL host ready for paste / history label.
+    /// Does NOT paste — the caller decides whether to paste the raw
+    /// result or append a hint.
     private func runPipeline(
         audioData: Data,
         mode: TranscriptionMode
-    ) async throws -> String {
+    ) async throws -> PipelineResult {
         let t0 = CFAbsoluteTimeGetCurrent()
 
         // Formal now uses the same Whisper bias as Literal: ship the
@@ -351,12 +368,13 @@ class PipelineCoordinator {
 
         // Surface resolution only for Formal+adaptToSurface. Kicked in
         // parallel so it overlaps with STT round-trip rather than
-        // serializing behind it.
+        // serializing behind it. `Resolved` carries both the LLM-routing
+        // surface AND the browser URL host (for History label enrichment).
         let bundleIDSnapshot = capturedBundleID
         let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
-        let surfaceTask: Task<Surface, Never>? = shouldResolveSurface
+        let surfaceTask: Task<SurfaceDetector.Resolved, Never>? = shouldResolveSurface
             ? Task.detached(priority: .userInitiated) {
-                await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+                await SurfaceDetector.resolve(bundleID: bundleIDSnapshot)
             }
             : nil
 
@@ -374,7 +392,7 @@ class PipelineCoordinator {
         #endif
 
         let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
+        guard !trimmed.isEmpty else { return PipelineResult(text: "", webHost: nil) }
 
         let corrected = TextPostProcessor.applyGlossary(
             rawTranscript,
@@ -389,22 +407,22 @@ class PipelineCoordinator {
             : corrected
 
         if mode == .literal {
-            return pass1Text
+            return PipelineResult(text: pass1Text, webHost: nil)
         }
 
         RecordingOverlayController.shared.showTranscribedText(pass1Text)
-        let surface = await surfaceTask?.value ?? .generic
+        let resolved = await surfaceTask?.value ?? .generic
         let finalText = try await llmService.cleanup(
             inputText: pass1Text,
             mode: mode,
             settings: appState.settings,
-            surface: surface
+            surface: resolved.surface
         )
         #if DEBUG
         let t2 = CFAbsoluteTimeGetCurrent()
         print("[Sprich] LLM: \(Int((t2 - t1) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
         #endif
-        return finalText
+        return PipelineResult(text: finalText, webHost: resolved.webHost)
     }
 
     /// Stop recording and process through the pipeline.
@@ -428,6 +446,14 @@ class PipelineCoordinator {
 
         do {
             let pipelineStart = CFAbsoluteTimeGetCurrent()
+
+            // Carries the browser tab host (e.g. "mail.google.com") out
+            // of the LLM-cleanup branch so the history-record block below
+            // can format the target-app label as "Google Chrome — Gmail".
+            // Stays nil for Literal mode, native apps, or when the
+            // browser AppleScript read failed / was denied — record()
+            // falls back to bare app name in that case.
+            var resolvedWebHost: String? = nil
 
             // 1. Stop recording and get audio data
             guard let audioData = try recorder.stopRecording() else {
@@ -462,9 +488,9 @@ class PipelineCoordinator {
             // whole point of Literal mode.
             let bundleIDSnapshot = capturedBundleID
             let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
-            let surfaceTask: Task<Surface, Never>? = shouldResolveSurface
+            let surfaceTask: Task<SurfaceDetector.Resolved, Never>? = shouldResolveSurface
                 ? Task.detached(priority: .userInitiated) {
-                    await SurfaceDetector.resolveSurface(bundleID: bundleIDSnapshot)
+                    await SurfaceDetector.resolve(bundleID: bundleIDSnapshot)
                 }
                 : nil
 
@@ -527,17 +553,22 @@ class PipelineCoordinator {
                 // `.generic`, which leaves the prompt unchanged.
                 // Worst case (browser AppleScript denied) also returns
                 // `.generic` from the detector.
-                let surface = await surfaceTask?.value ?? .generic
+                let resolved = await surfaceTask?.value ?? .generic
                 #if DEBUG
-                print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(surface.debugLabel)")
+                print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(resolved.surface.debugLabel) (host=\(resolved.webHost ?? "—"))")
                 #endif
 
                 finalText = try await llmService.cleanup(
                     inputText: pass1Text,
                     mode: mode,
                     settings: appState.settings,
-                    surface: surface
+                    surface: resolved.surface
                 )
+                // Stash the host so the post-deliver history record can
+                // format `targetApp` as "App — Brand" without re-running
+                // the AppleScript. `resolvedWebHost` is declared at the
+                // top of the `do` block.
+                resolvedWebHost = resolved.webHost
                 let t3 = CFAbsoluteTimeGetCurrent()
                 #if DEBUG
                 print("[Sprich] LLM: \(Int((t3 - t2) * 1000))ms \(InputSanitizer.redactForLog(finalText))")
@@ -555,11 +586,21 @@ class PipelineCoordinator {
             // Skip when the onboarding intercept was active (the "Try it
             // now" surface is not a real dictation the user pasted
             // anywhere) and when the text is empty.
+            //
+            // v1.0.11 — enrich `targetApp` with the browser brand name
+            // when known: "Google Chrome" → "Google Chrome — Gmail".
+            // `resolvedWebHost` is non-nil only for Formal+adaptToSurface
+            // dictations in a supported browser with Automation TCC
+            // granted; everywhere else this falls back to bare app name.
             if interceptOutput == nil {
+                let label = WebSurfaceLabel.formatTargetApp(
+                    appName: capturedAppName,
+                    webHost: resolvedWebHost
+                )
                 HistoryStore.shared.record(
                     text: finalText,
                     mode: mode,
-                    targetApp: capturedAppName
+                    targetApp: label
                 )
             }
 

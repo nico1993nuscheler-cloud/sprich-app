@@ -20,24 +20,45 @@ enum SurfaceDetector {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     }
 
+    /// Resolved surface + (for browsers) the URL host that produced it.
+    /// History uses `webHost` to render brand-specific labels
+    /// ("Google Chrome — Gmail"); LLM tone routing only consumes `surface`.
+    struct Resolved {
+        let surface: Surface
+        /// Lowercased URL host from the active browser tab — present only
+        /// when the browser AppleScript read succeeded. `nil` for native
+        /// apps, unsupported browsers, denied Automation TCC, or any read
+        /// failure.
+        let webHost: String?
+
+        static let generic = Resolved(surface: .generic, webHost: nil)
+    }
+
     /// Resolve the captured bundle ID (plus, for browsers, the active tab
-    /// URL) to a `Surface`. Never throws — any failure returns `.generic`
-    /// so today's formal-mode behavior is preserved as a safe fallback.
-    static func resolveSurface(bundleID: String?) async -> Surface {
+    /// URL) to a `Surface` + URL host. Never throws — any failure returns
+    /// `.generic` with `webHost == nil` so today's Formal-mode behavior is
+    /// preserved as a safe fallback.
+    static func resolve(bundleID: String?) async -> Resolved {
         guard let bundleID = bundleID else { return .generic }
 
         if let native = SurfaceMapping.fromNativeBundleID(bundleID) {
-            return native
+            return Resolved(surface: native, webHost: nil)
         }
 
-        if SurfaceMapping.isAppleScriptBrowser(bundleID) {
-            if let urlString = await readActiveTabURL(browserBundleID: bundleID),
-               let surface = SurfaceMapping.fromURL(urlString) {
-                return surface
-            }
+        if SurfaceMapping.isAppleScriptBrowser(bundleID),
+           let urlString = await readActiveTabURL(browserBundleID: bundleID) {
+            let host = URL(string: urlString)?.host?.lowercased()
+            let surface = SurfaceMapping.fromURL(urlString) ?? .generic
+            return Resolved(surface: surface, webHost: host)
         }
 
         return .generic
+    }
+
+    /// Back-compat wrapper for callers that only need the `Surface`
+    /// (no history labelling). Prefer `resolve(bundleID:)` for new callers.
+    static func resolveSurface(bundleID: String?) async -> Surface {
+        await resolve(bundleID: bundleID).surface
     }
 
     // MARK: - AppleScript browser tab reads
