@@ -1,17 +1,20 @@
 import SwiftUI
 import AppKit
 
-/// Settings → Home (P1-PRD-12). The History view — 30-day rolling
-/// window of dictations, text-only, click-to-copy, search-by-text.
-/// No audio persistence. Lives at the top of the sidebar.
-struct HomeSection: View {
-    // P1-BUG-01 (v1.0.8 hotfix): kept as @StateObject. Switching to
-    // @ObservedObject for "correctness with a singleton" actually broke
-    // NavigationSplitView's detail rendering (entire detail column went
-    // blank on mount). @StateObject works fine here in practice — the
-    // real bug was HistoryStore.init() publishing to @Published.entries
-    // synchronously during the first view render. Fixed there by deferring
-    // the initial reload() to DispatchQueue.main.async.
+/// Settings → History (P1-PRD-12). 30-day rolling window of dictations,
+/// text-only, click-to-copy, search-by-text. No audio persistence. Lives
+/// at the top of the sidebar.
+///
+/// v1.0.10 rename: was `HomeSection`. The section was always the History
+/// view per P1-PRD-12 — "Home" was a vestigial sidebar label without
+/// matching multi-card content. Honest naming, no functional change.
+struct HistorySection: View {
+    // P1-BUG-01: `@StateObject` is correct here — switching to
+    // `@ObservedObject` broke detail rendering in the NavigationSplitView
+    // era (now retired in v1.0.10 — see SettingsView.body for full bug
+    // history). The synchronous-publish-during-render issue this property
+    // wrapper choice originally got blamed for was actually fixed in
+    // `HistoryStore.init` (deferred-reload via `DispatchQueue.main.async`).
     @StateObject private var store = HistoryStore.shared
 
     @State private var query: String = ""
@@ -28,18 +31,6 @@ struct HomeSection: View {
     }
 
     var body: some View {
-        // P1-BUG-01 (v1.0.9 fix): outer frame must NOT include
-        // `maxHeight: .infinity`. Every other Settings section uses just
-        // `.frame(maxWidth: .infinity, alignment: .topLeading)` — only
-        // HomeSection had `maxHeight: .infinity`, and that was the cause
-        // of the Settings sidebar collapsing on Home click. The infinite-
-        // height request inside NavigationSplitView's detail column
-        // triggered macOS's auto-collapse heuristic (decides the detail
-        // is "large enough" to deserve the whole window).
-        //
-        // The inner ScrollView still gets the available height because
-        // SettingsView's outer Group has its own `maxHeight: .infinity`
-        // (SettingsView.swift:121) and propagates it via topLeading.
         VStack(alignment: .leading, spacing: 0) {
             header
             searchAndActions
@@ -66,7 +57,7 @@ struct HomeSection: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            SettingsSectionHeader(icon: "house", title: "Home")
+            SettingsSectionHeader(icon: "clock.arrow.circlepath", title: "History")
             Text("Everything Sprich has dictated in the last 30 days. Text only — no audio is ever stored. Click any entry to copy it back to your clipboard.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -119,8 +110,16 @@ struct HomeSection: View {
     }
 
     private var entryList: some View {
+        // P1-BUG-01 (v1.0.10): `VStack` (eager), not `LazyVStack`. LazyVStack
+        // inside ScrollView caused two symptoms: (1) the scrollbar's thumb
+        // resized as rows materialized below the fold — the content height
+        // estimate kept growing — feeling "weird" to scroll; (2) newly recorded
+        // entries didn't reliably reflow to the top because Lazy stacks
+        // memoize off-screen children and don't re-sort on `@Published`
+        // changes. 30-day retention caps the worst case at a few hundred rows,
+        // so eager layout is fine.
         ScrollView {
-            LazyVStack(spacing: 0) {
+            VStack(spacing: 0) {
                 ForEach(filteredEntries) { entry in
                     HistoryRow(
                         entry: entry,

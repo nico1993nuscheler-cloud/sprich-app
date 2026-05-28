@@ -9,7 +9,13 @@ import SwiftUI
 /// `.sprichOpenSettingsSection` notification carrying the section to
 /// route to; `SettingsView` listens and updates `selection`.
 enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
-    case home
+    // v1.0.10: renamed `.home` → `.history`. The section was always the
+    // history view per P1-PRD-12; "Home" was a vestigial sidebar label
+    // from an earlier IA sketch that never had real multi-card content.
+    // No persisted callers reference `"home"` (verified) and the only
+    // `.sprichOpenSettingsSection` poster routes to `.aiModels`, so the
+    // raw-value flip is safe.
+    case history
     case account
     case aiModels
     case modes
@@ -22,7 +28,7 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .home:       return "Home"
+        case .history:    return "History"
         case .account:    return "Account"
         case .aiModels:   return "AI Models"
         case .modes:      return "Modes"
@@ -35,7 +41,7 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
 
     var iconName: String {
         switch self {
-        case .home:       return "house"
+        case .history:    return "clock.arrow.circlepath"
         case .account:    return "person.crop.circle"
         case .aiModels:   return "brain"
         case .modes:      return "text.quote"
@@ -80,24 +86,37 @@ struct SettingsView: View {
     @State private var hardwareTier: HardwareProbe.Tier = .recommended
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selection) { section in
-                NavigationLink(value: section) {
-                    Label(section.displayName, systemImage: section.iconName)
-                        // Sprint 3 polish #4 — extra row breathing room so
-                        // labels don't read flush against the sidebar edge.
-                        .padding(.vertical, 2)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 210, max: 240)
-            .listStyle(.sidebar)
-        } detail: {
+        // P1-BUG-01 (v1.0.10 fix): manual HStack + custom sidebar.
+        //
+        // History:
+        //   v1.0.8: HistoryStore reload deferred to avoid publish-during-render.
+        //   v1.0.9: `.navigationSplitViewStyle(.balanced)` + HistorySection
+        //           outer frame stripped of `maxHeight: .infinity`. Shipped,
+        //           still broke.
+        //   v1.0.10 attempt 1: HSplitView replacement. Sidebar column rendered
+        //           with correct width BUT `List` rows didn't render inside it
+        //           — empty gray column, useless.
+        //   v1.0.10 final: drop the split container entirely. Build the sidebar
+        //           as a plain VStack of selection buttons inside an HStack.
+        //           No NavigationSplitView column-visibility heuristic, no
+        //           HSplitView/List interaction quirk. The Settings window
+        //           drives selection via `@State selection: SettingsSection`
+        //           already, so we don't lose any navigation behavior.
+        //           Visual treatment uses `.regularMaterial` so the sidebar
+        //           still reads as a sidebar (vibrancy) on macOS.
+        HStack(spacing: 0) {
+            customSidebar
+                .frame(width: 210)
+                .background(.regularMaterial)
+
+            Divider()
+
             // Each section is wired ticket-by-ticket. The shell (this ticket,
             // P1-UX-01) lands a placeholder for every section so navigation
             // works end-to-end; P1-UX-03 through P1-UX-12 replace them.
             Group {
                 switch selection {
-                case .home:      HomeSection()
+                case .history:   HistorySection()
                 case .account:   AccountSection()
                 case .aiModels:
                     AIModelsSection(
@@ -120,14 +139,6 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        // P1-BUG-01 (v1.0.9 fix): force `.balanced` style on macOS to keep
-        // sidebar + detail both visible at all times. Default `.automatic`
-        // style silently flips to `.prominentDetail` (sidebar collapsed)
-        // for certain detail-pane content shapes — specifically HomeSection
-        // mounting was triggering that flip with no recovery affordance
-        // (window has no toggle button), stranding the user.
-        // `.balanced` is the explicit "always show both columns" policy.
-        .navigationSplitViewStyle(.balanced)
         .frame(width: 820, height: 640)
         .onReceive(NotificationCenter.default.publisher(for: .sprichOpenSettingsSection)) { note in
             if let raw = note.userInfo?["section"] as? String,
@@ -184,6 +195,44 @@ struct SettingsView: View {
                 }
             )
         }
+    }
+
+    /// Manual sidebar replacement for `List(selection:)` + `.listStyle(.sidebar)`.
+    /// Each row is a plain Button; selected row gets an accent-tinted background.
+    /// Renders deterministically inside HStack (the previous List-inside-HSplitView
+    /// rendered as an empty column — see body comment for full bug history).
+    private var customSidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(SettingsSection.allCases) { section in
+                Button {
+                    selection = section
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: section.iconName)
+                            .frame(width: 18, alignment: .center)
+                            .foregroundStyle(selection == section ? Color.accentColor : .secondary)
+                        Text(section.displayName)
+                            .foregroundStyle(selection == section ? .primary : .primary)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(selection == section
+                                  ? Color.accentColor.opacity(0.18)
+                                  : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private func loadKeys() {
