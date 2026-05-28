@@ -33,7 +33,7 @@
 		A10000063 /* CorrectionLearner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000063 /* CorrectionLearner.swift */; };
 		A10000066 /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000066 /* LaunchAtLoginManager.swift */; };
 		A10000067 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000067 /* HistoryStore.swift */; };
-		A10000068 /* HomeSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000068 /* HomeSection.swift */; };
+		A10000068 /* HistorySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000068 /* HistorySection.swift */; };
 		A10000064 /* CorrectionBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000064 /* CorrectionBanner.swift */; };
 		A10000065 /* DictionarySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000065 /* DictionarySection.swift */; };
 		A10000018 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000021 /* RecordingOverlay.swift */; };
@@ -48,6 +48,7 @@
 		A10000027 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = H10000001 /* WhisperKit */; };
 		A10000049 /* LocalLLMClient in Frameworks */ = {isa = PBXBuildFile; productRef = H10000002 /* LocalLLMClient */; };
 		A10000050 /* LocalLLMClientLlama in Frameworks */ = {isa = PBXBuildFile; productRef = H10000003 /* LocalLLMClientLlama */; };
+		A10000080 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = H10000004 /* Sparkle */; };
 		A10000028 /* NetworkReachability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000030 /* NetworkReachability.swift */; };
 		A10000029 /* WhisperModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000031 /* WhisperModelCatalog.swift */; };
 		A10000030 /* ModeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000032 /* ModeTokens.swift */; };
@@ -125,7 +126,7 @@
 		B10000063 /* CorrectionLearner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionLearner.swift; sourceTree = "<group>"; };
 		B10000066 /* LaunchAtLoginManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAtLoginManager.swift; sourceTree = "<group>"; };
 		B10000067 /* HistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStore.swift; sourceTree = "<group>"; };
-		B10000068 /* HomeSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/HomeSection.swift; sourceTree = "<group>"; };
+		B10000068 /* HistorySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/HistorySection.swift; sourceTree = "<group>"; };
 		B10000064 /* CorrectionBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CorrectionBanner.swift; sourceTree = "<group>"; };
 		B10000065 /* DictionarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/DictionarySection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -138,6 +139,7 @@
 				A10000027 /* WhisperKit in Frameworks */,
 				A10000049 /* LocalLLMClient in Frameworks */,
 				A10000050 /* LocalLLMClientLlama in Frameworks */,
+				A10000080 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,7 +267,7 @@
 				B10000061 /* MissingKeyBanner.swift */,
 				B10000064 /* CorrectionBanner.swift */,
 				B10000065 /* DictionarySection.swift */,
-				B10000068 /* HomeSection.swift */,
+				B10000068 /* HistorySection.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -309,6 +311,7 @@
 				H10000001 /* WhisperKit */,
 				H10000002 /* LocalLLMClient */,
 				H10000003 /* LocalLLMClientLlama */,
+				H10000004 /* Sparkle */,
 			);
 			productName = Sprich;
 			productReference = B10000020 /* Sprich.app */;
@@ -341,6 +344,7 @@
 			packageReferences = (
 				G10000001 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
 				G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */,
+				G10000003 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			productRefGroup = D10000008 /* Products */;
 			projectDirPath = "";
@@ -419,7 +423,7 @@
 				A10000063 /* CorrectionLearner.swift in Sources */,
 				A10000066 /* LaunchAtLoginManager.swift in Sources */,
 				A10000067 /* HistoryStore.swift in Sources */,
-				A10000068 /* HomeSection.swift in Sources */,
+				A10000068 /* HistorySection.swift in Sources */,
 				A10000064 /* CorrectionBanner.swift in Sources */,
 				A10000065 /* DictionarySection.swift in Sources */,
 			);
@@ -576,6 +580,14 @@
 				minimumVersion = 0.5.0;
 			};
 		};
+		G10000003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.2;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -593,6 +605,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = G10000002 /* XCRemoteSwiftPackageReference "LocalLLMClient" */;
 			productName = LocalLLMClientLlama;
+		};
+		H10000004 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = G10000003 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

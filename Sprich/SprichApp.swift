@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UserNotifications
+import Sparkle
 
 extension Notification.Name {
     static let sprichOnboardingComplete = Notification.Name("sprich.onboardingComplete")
@@ -27,6 +28,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// transcription back into the onboarding window.
     var pipeline: PipelineCoordinator!
     private var hotkeyManager: HotkeyManager!
+
+    /// Sparkle auto-updater (v1.0.10). `startingUpdater: true` makes the
+    /// first scheduled check fire ~SUScheduledCheckInterval after launch
+    /// (86400 s in Info.plist) and re-arms daily. The menubar "Check for
+    /// Updates…" row routes through `updaterController.checkForUpdates(_:)`
+    /// for on-demand checks. Feed + EdDSA public key are wired via
+    /// Info.plist (SUFeedURL, SUPublicEDKey); the private key lives only
+    /// in macOS keychain.
+    private let updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: nil
+    )
 
     /// True when launchd started us as a Login Item (P1-PRD-16). Captured
     /// once at didFinishLaunching so any later check sees the same answer
@@ -611,6 +625,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         helpItem.target = self
         menu.addItem(helpItem)
 
+        // Sparkle auto-update — manual "Check for Updates…" entry.
+        // Routes through SPUStandardUpdaterController, which also runs
+        // a scheduled check daily (SUScheduledCheckInterval = 86400).
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.image = NSImage(systemSymbolName: "arrow.down.circle",
+                                   accessibilityDescription: "Check for updates")
+        updateItem.target = self
+        menu.addItem(updateItem)
+
         // Diagnostics submenu — recovery actions that are useful when
         // something's off but shouldn't clutter the main menu. P1-UX-16
         // renamed both items away from dev-tool wording flagged by the
@@ -765,6 +792,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.appState.settings.customModeEnabled ?? false
         }
         hotkeyManager.start()
+    }
+
+    /// Manual "Check for Updates…" entry point. Sparkle handles the rest
+    /// (fetches appcast, verifies EdDSA signature, shows update dialog).
+    @objc private func checkForUpdates() {
+        updaterController.checkForUpdates(nil)
     }
 
     @objc private func openSettings() {

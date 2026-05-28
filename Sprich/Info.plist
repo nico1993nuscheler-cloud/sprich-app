@@ -42,5 +42,15 @@
 	<string>Sprich reads the active browser tab URL to detect whether you're in Gmail, Slack, Google Chat, or another chat/email surface so it can match the tone of its rewrite. Only the URL is read; nothing is sent to those apps.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sprich needs microphone access to record your voice for transcription. Audio is sent directly to your chosen provider and never saved to disk.</string>
+	<key>SUFeedURL</key>
+	<string>https://sprichapp.com/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>TK949JeWrNfCDkB4sDmWkWLswvnLTwUNHPxqdff+Ftg=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

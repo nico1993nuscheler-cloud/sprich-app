@@ -82,7 +82,7 @@ final class HistoryStore: ObservableObject {
         // from init(). `reload()` assigns to `@Published var entries`; if
         // init() runs on the same run-loop tick that a SwiftUI view first
         // accesses `.shared` (which previously happened via `@StateObject`
-        // in `HomeSection`), the publish fires during a view-update pass
+        // in `HistorySection`), the publish fires during a view-update pass
         // and SwiftUI emits "Publishing changes from within view updates
         // is not allowed". That, in turn, made `NavigationSplitView`
         // reassert column visibility and collapse the Settings sidebar.
