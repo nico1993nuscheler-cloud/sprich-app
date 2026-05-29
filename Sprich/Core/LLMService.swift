@@ -142,17 +142,22 @@ class LLMService {
         // Cloud post-processing. Formal mode enforces the sentence-count
         // contract; non-Formal modes (Custom) only get artifact cleanup.
         if mode == .formal {
+            let effectiveSurface: Surface = settings.adaptToSurface ? surface : .generic
             let result = FormalOutputGuard.enforce(
                 pass1Text: sanitizedText,
                 rawLLMOutput: rawLLMOutput,
-                language: settings.preferredLanguage
+                language: settings.preferredLanguage,
+                surface: effectiveSurface
             )
             #if DEBUG
             if result.usedFallback {
                 print("[Sprich] Formal guard fallback (cloud): \(result.fallbackReason ?? "?")")
             }
             #endif
-            return result.text
+            // Deterministic shape normalisation — ensures email greeting/
+            // sign-off get blank-line framing even when the model produced
+            // only half the shape. No-op on non-email surfaces.
+            return TextPostProcessor.normalizeShape(result.text, surface: effectiveSurface)
         } else {
             let cleaned = FormalOutputGuard.stripWrappingQuotes(
                 FormalOutputGuard.stripPreamble(rawLLMOutput)

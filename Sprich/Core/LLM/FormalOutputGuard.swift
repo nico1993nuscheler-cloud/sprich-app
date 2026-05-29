@@ -55,10 +55,100 @@ enum FormalOutputGuard {
         let fallbackReason: String?
     }
 
-    /// Sentence-count delta tolerance. ±1 allows a legitimate split or
-    /// merge of one run-on sentence; a model adding a greeting + sign-off
-    /// adds at least two sentences and trips the guard.
-    static let sentenceCountTolerance: Int = 1
+    /// Per-surface guard policy. Different destinations legitimately
+    /// restructure Pass-1 in different ways — an email adds greeting +
+    /// sign-off scaffolding, a task description compresses prose into
+    /// an imperative title plus optional bulleted sub-points, an AI
+    /// chat prompt drops politeness and surfaces constraints as
+    /// bullets — so a single fixed contract trips on shape changes the
+    /// destination explicitly asked for.
+    ///
+    /// The hallucination filters (`minimumLengthRatio`,
+    /// `minimumContentRecall`, language drift) stay constant across
+    /// surfaces; only the structural-shape upper bounds vary.
+    struct Policy {
+        /// Allowed delta between Pass-1 and output sentence counts.
+        let sentenceCountTolerance: Int
+        /// Output character count must not exceed this multiple of
+        /// Pass-1's character count.
+        let maximumLengthRatio: Double
+    }
+
+    /// Default policy — applies to surfaces that do not restructure
+    /// Pass-1 (chat surfaces, docs, generic). ±1 sentence split + ≤1.6×
+    /// length covers legitimate polishing while still tripping the
+    /// 1.71× cross-language paraphrase observed on Gemma 3 1B.
+    static let defaultPolicy = Policy(
+        sentenceCountTolerance: 1,
+        maximumLengthRatio: 1.6
+    )
+
+    /// Email policy. Greeting + sign-off add at minimum +2 sentences
+    /// over Pass-1 (often +3 with a body split), and lift short inputs
+    /// well past the default 1.6× length ceiling (a 30-char Pass-1
+    /// becomes ~50 chars at ~1.67×; a 64-char Pass-1 becomes ~120 at
+    /// ~1.87×). 2.5× still catches the "answered the question"
+    /// hallucination — a question becomes a 5×-length numbered list.
+    static let emailPolicy = Policy(
+        sentenceCountTolerance: 4,
+        maximumLengthRatio: 2.5
+    )
+
+    /// Task-manager policy (ClickUp / Linear / Notion / Jira / Asana
+    /// / Trello / Todoist / Things / Monday / Height / Basecamp / …).
+    /// Output is an imperative task description, often expanded into a
+    /// title line + bulleted sub-points when the dictation carried
+    /// context. Each bullet typically reads as its own sentence to
+    /// `NLTokenizer`, so a 1-sentence input with 3 bullets lands at
+    /// delta=3; ±5 covers up to 5 bullets without leaking the
+    /// "wrote the work instead of describing it" failure (which
+    /// produces paragraphs of prose, not a tight bullet list).
+    /// Length cap stays moderate (1.8×) — task descriptions are
+    /// usually shorter or close to Pass-1; large expansion is a red
+    /// flag.
+    static let taskManagerPolicy = Policy(
+        sentenceCountTolerance: 5,
+        maximumLengthRatio: 1.8
+    )
+
+    /// AI-chat policy (ChatGPT / Claude / Gemini / Copilot / Perplexity
+    /// / DeepSeek / Mistral / Grok / Poe / Phind / You.com / …). Output
+    /// is a direct imperative prompt; politeness words ("please",
+    /// "could you") drop out, and dictated constraints may surface as a
+    /// bulleted list. Similar shape budget to task-manager: ±5
+    /// sentences for bullets, ≤1.8× length. Imperative prompts
+    /// typically compress input, so the upper bound is rarely the
+    /// active check — the hallucination filters (content recall,
+    /// language drift) carry the protection.
+    static let aiChatPolicy = Policy(
+        sentenceCountTolerance: 5,
+        maximumLengthRatio: 1.8
+    )
+
+    /// Docs policy. Output preserves prose structure with paragraph
+    /// breaks and lists when dictated. Slightly looser than default —
+    /// ±2 sentences for a paragraph split, ≤1.8× length for inline
+    /// expansion. Still tighter than email/task because docs do not
+    /// add scaffolding the user didn't dictate.
+    static let docsPolicy = Policy(
+        sentenceCountTolerance: 2,
+        maximumLengthRatio: 1.8
+    )
+
+    /// Resolve the policy for a destination surface. Chat surfaces
+    /// (Slack / Messages / Google Chat / Teams / Discord) and
+    /// `.generic` use the default; every restructuring surface gets
+    /// its own band.
+    static func policy(for surface: Surface) -> Policy {
+        switch surface {
+        case .email:                                   return emailPolicy
+        case .taskManager:                             return taskManagerPolicy
+        case .aiChat:                                  return aiChatPolicy
+        case .docs:                                    return docsPolicy
+        case .slack, .messages, .googleChat, .teams,
+             .discord, .generic:                       return defaultPolicy
+        }
+    }
 
     /// Output character count must be at least this fraction of the
     /// Pass-1 character count. Catches content-gutting failures the
@@ -66,19 +156,12 @@ enum FormalOutputGuard {
     /// sentence into a noun-phrase fragment of the same sentence count).
     /// 0.5 is conservative — legitimate compression of a rambly
     /// dictation typically lands in 0.6–0.8.
+    ///
+    /// Shared across surfaces. Surfaces that compress harder than 0.5×
+    /// (task-manager, ai-chat on very rambly inputs) typically come in
+    /// at 0.55–0.7 in practice; if we ever see legitimate sub-0.5×
+    /// compression on those, lift this per-surface too.
     static let minimumLengthRatio: Double = 0.5
-
-    /// Output character count must not exceed this multiple of the
-    /// Pass-1 character count. Catches "same sentence count but the
-    /// model rewrote with substituted content and added words"
-    /// failures (German→English hallucination case). 1.6 leaves
-    /// comfortable headroom for legitimate cleanup:
-    /// - "Thanks." → "Thank you." is 1.43×
-    /// - "wanna" → "want to" expansions in a paragraph are ~1.1×
-    /// - polished-prose round-trip is ~1.0×
-    /// while still tripping on the 1.71× cross-language paraphrase
-    /// observed on Gemma 3 1B.
-    static let maximumLengthRatio: Double = 1.6
 
     /// Below this Pass-1 character count the length-ratio checks are
     /// skipped — short dictations ("Thanks." → "Thank you.") have
@@ -131,11 +214,20 @@ enum FormalOutputGuard {
     ///
     /// `language` is the ISO 639-1 source language code (or nil for
     /// auto-detect) — used to hint `NLTokenizer`'s sentence boundaries.
+    ///
+    /// `surface` selects the sentence-count and length-ratio policy
+    /// (see `policy(for:)`). Restructuring surfaces (email, task
+    /// manager, AI chat, docs) get looser shape bounds because their
+    /// destination prompts explicitly request shape changes; the
+    /// hallucination filters (content recall, language drift, min
+    /// length) stay constant across all surfaces.
     static func enforce(
         pass1Text: String,
         rawLLMOutput: String,
-        language: String?
+        language: String?,
+        surface: Surface = .generic
     ) -> Result {
+        let policy = Self.policy(for: surface)
         let cleaned = stripWrappingQuotes(stripPreamble(rawLLMOutput))
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -150,6 +242,7 @@ enum FormalOutputGuard {
         // is sufficient there.
         let pass1Chars = pass1Text.count
         let outputChars = cleaned.count
+        let maxRatio = policy.maximumLengthRatio
         if pass1Chars >= Self.minimumLengthCheckChars {
             let ratio = Double(outputChars) / Double(pass1Chars)
             if ratio < Self.minimumLengthRatio {
@@ -162,14 +255,15 @@ enum FormalOutputGuard {
                     )
                 )
             }
-            if ratio > Self.maximumLengthRatio {
+            if ratio > maxRatio {
+                let detail = String(
+                    format: "output too long (%d chars vs pass1=%d, ratio=%.2f, cap=%.2f",
+                    outputChars, pass1Chars, ratio, maxRatio
+                )
                 return Result(
                     text: pass1Text,
                     usedFallback: true,
-                    fallbackReason: String(
-                        format: "output too long (%d chars vs pass1=%d, ratio=%.2f)",
-                        outputChars, pass1Chars, ratio
-                    )
+                    fallbackReason: "\(detail), surface=\(surface.debugLabel))"
                 )
             }
         }
@@ -222,11 +316,12 @@ enum FormalOutputGuard {
         let pass1Count = countSentences(pass1Text, language: language)
         let outputCount = countSentences(cleaned, language: language)
         let delta = abs(outputCount - pass1Count)
-        if delta > sentenceCountTolerance {
+        let tolerance = policy.sentenceCountTolerance
+        if delta > tolerance {
             return Result(
                 text: pass1Text,
                 usedFallback: true,
-                fallbackReason: "sentence-count delta \(delta) (pass1=\(pass1Count), out=\(outputCount))"
+                fallbackReason: "sentence-count delta \(delta) (pass1=\(pass1Count), out=\(outputCount), tol=\(tolerance), surface=\(surface.debugLabel))"
             )
         }
 

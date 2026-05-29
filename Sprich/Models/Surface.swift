@@ -23,11 +23,19 @@ enum Surface: String, Codable, Equatable, CaseIterable {
         switch self {
         case .email:
             return """
-                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. Keep paragraph breaks. No emoji.
+                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. No emoji.
+
+                Recipient name rule: if the dictation begins with a greeting that includes a recipient name ("Hi Maria,", "Hello Tom,", "Hallo Lukas,", "Dear Dr. Schmidt,"), PRESERVE the name verbatim. Never replace a named greeting with a generic "Hi," — the name is the user's content, not optional scaffolding. Same for the sign-off: if the user dictated their own name after a closing ("Best, Nico."), keep it.
+
+                Paragraph rule: split the body into separate paragraphs (blank line between) whenever the dictation covers distinct topics, asks separate questions, or moves from "context" to "ask" to "next step". One paragraph per logical chunk. Do NOT cram multiple distinct topics into a single run-on paragraph.
 
                 The email scaffolding (greeting + sign-off) wraps the polished dictation. The dictation itself is the body content — NEVER answered, NEVER expanded, NEVER fulfilled. A dictated question becomes a question asked in the email. A dictated request becomes a request made in the email.
 
-                Voice example (request stays a request):
+                Voice example (named recipient — KEEP the name, two body paragraphs):
+                  INPUT:  "hi maria just wanted to follow up on the proposal we sent last week also could you let me know if you need anything else from us to move things forward"
+                  OUTPUT: "Hi Maria,\n\nI wanted to follow up on the proposal we sent last week.\n\nCould you also let me know if you need anything else from us to move things forward?\n\nBest,"
+
+                Voice example (no recipient dictated — generic greeting OK, single-topic body):
                   INPUT:  "hey can you send over the Q3 numbers by Friday thanks"
                   OUTPUT: "Hi,\n\nCould you please send over the Q3 numbers by Friday?\n\nThanks,"
 
