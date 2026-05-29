@@ -23,11 +23,19 @@ enum Surface: String, Codable, Equatable, CaseIterable {
         switch self {
         case .email:
             return """
-                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. Keep paragraph breaks. No emoji.
+                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. No emoji.
+
+                Recipient name rule: if the dictation begins with a greeting that includes a recipient name ("Hi Maria,", "Hello Tom,", "Hallo Lukas,", "Dear Dr. Schmidt,"), PRESERVE the name verbatim. Never replace a named greeting with a generic "Hi," — the name is the user's content, not optional scaffolding. Same for the sign-off: if the user dictated their own name after a closing ("Best, Nico."), keep it.
+
+                Paragraph rule: split the body into separate paragraphs (blank line between) whenever the dictation covers distinct topics, asks separate questions, or moves from "context" to "ask" to "next step". One paragraph per logical chunk. Do NOT cram multiple distinct topics into a single run-on paragraph.
 
                 The email scaffolding (greeting + sign-off) wraps the polished dictation. The dictation itself is the body content — NEVER answered, NEVER expanded, NEVER fulfilled. A dictated question becomes a question asked in the email. A dictated request becomes a request made in the email.
 
-                Voice example (request stays a request):
+                Voice example (named recipient — KEEP the name, two body paragraphs):
+                  INPUT:  "hi maria just wanted to follow up on the proposal we sent last week also could you let me know if you need anything else from us to move things forward"
+                  OUTPUT: "Hi Maria,\n\nI wanted to follow up on the proposal we sent last week.\n\nCould you also let me know if you need anything else from us to move things forward?\n\nBest,"
+
+                Voice example (no recipient dictated — generic greeting OK, single-topic body):
                   INPUT:  "hey can you send over the Q3 numbers by Friday thanks"
                   OUTPUT: "Hi,\n\nCould you please send over the Q3 numbers by Friday?\n\nThanks,"
 
@@ -270,5 +278,153 @@ enum SurfaceMapping {
         if host == "docs.google.com" { return .docs }
 
         return nil
+    }
+}
+
+// MARK: - Web brand display (history label)
+
+/// Maps a browser-tab URL host to the brand/service display name shown
+/// in the History row (e.g. "Gmail", "Notion", "LinkedIn"). Separate from
+/// `Surface` because `Surface` is a coarse tone-routing category for the
+/// LLM (`.email` / `.taskManager` / …), while History wants the specific
+/// brand a user actually recognizes.
+///
+/// Curated list below covers the most-common surfaces. Anything unmapped
+/// falls back to a title-cased second-level domain — `figma.com` → "Figma",
+/// `randomtool.io` → "Randomtool". That keeps the label meaningful for the
+/// long tail without per-host curation.
+enum WebSurfaceLabel {
+
+    /// Resolve a URL host (case-insensitive) to a brand display name.
+    /// Returns `nil` only for empty/invalid input — every real host
+    /// gets at least the title-cased fallback.
+    static func displayName(forHost host: String) -> String? {
+        let h = host.lowercased()
+        guard !h.isEmpty else { return nil }
+
+        // Google suite
+        if h == "mail.google.com"                      { return "Gmail" }
+        if h == "chat.google.com"                      { return "Google Chat" }
+        if h == "docs.google.com"                      { return "Google Docs" }
+        if h == "drive.google.com"                     { return "Google Drive" }
+        if h == "calendar.google.com"                  { return "Google Calendar" }
+        if h == "meet.google.com"                      { return "Google Meet" }
+        if h == "sheets.google.com"                    { return "Google Sheets" }
+        if h == "slides.google.com"                    { return "Google Slides" }
+        if h == "gemini.google.com" || h == "bard.google.com" { return "Gemini" }
+        if h == "aistudio.google.com"                  { return "Google AI Studio" }
+
+        // Microsoft suite
+        if h.hasSuffix("outlook.live.com") ||
+           h.hasSuffix("outlook.office.com") ||
+           h.hasSuffix("outlook.office365.com")        { return "Outlook" }
+        if h.hasSuffix("teams.microsoft.com") ||
+           h.hasSuffix("teams.live.com")               { return "Teams" }
+        if h == "copilot.microsoft.com"                { return "Copilot" }
+
+        // Chat / messaging
+        if h.hasSuffix("slack.com")                    { return "Slack" }
+        if h.hasSuffix("discord.com")                  { return "Discord" }
+        if h == "web.whatsapp.com" || h.hasSuffix(".web.whatsapp.com") { return "WhatsApp" }
+        if h.hasSuffix("messenger.com")                { return "Messenger" }
+        if h.hasSuffix("signal.org")                   { return "Signal" }
+
+        // AI chat assistants
+        if h == "chatgpt.com" || h.hasSuffix(".chatgpt.com") ||
+           h == "chat.openai.com"                      { return "ChatGPT" }
+        if h == "claude.ai"   || h.hasSuffix(".claude.ai") ||
+           h == "claude.com"  || h.hasSuffix(".claude.com") { return "Claude" }
+        if h == "perplexity.ai" || h.hasSuffix(".perplexity.ai") { return "Perplexity" }
+        if h == "chat.deepseek.com" || h == "deepseek.com" ||
+           h.hasSuffix(".deepseek.com")                { return "DeepSeek" }
+        if h == "chat.mistral.ai" || h == "mistral.ai" { return "Mistral" }
+        if h == "grok.com"  || h.hasSuffix(".grok.com") ||
+           h == "x.ai"      || h.hasSuffix(".x.ai")    { return "Grok" }
+        if h == "poe.com"   || h.hasSuffix(".poe.com") { return "Poe" }
+        if h == "phind.com"                            { return "Phind" }
+        if h == "you.com"   || h == "chat.you.com"     { return "You.com" }
+
+        // Project-management / task tools
+        if h.hasSuffix("notion.so") || h.hasSuffix("notion.site") { return "Notion" }
+        if h.hasSuffix("linear.app")                   { return "Linear" }
+        if h == "clickup.com" || h.hasSuffix(".clickup.com") { return "ClickUp" }
+        if h.hasSuffix("asana.com")                    { return "Asana" }
+        if h.hasSuffix("atlassian.net")                { return "Atlassian" }
+        if h == "trello.com" || h.hasSuffix(".trello.com") { return "Trello" }
+        if h == "todoist.com" || h.hasSuffix(".todoist.com") { return "Todoist" }
+        if h == "monday.com" || h.hasSuffix(".monday.com") { return "Monday" }
+        if h == "basecamp.com" || h.hasSuffix(".basecamp.com") ||
+           h.hasSuffix(".basecamphq.com")              { return "Basecamp" }
+        if h == "height.app" || h.hasSuffix(".height.app") { return "Height" }
+        if h.hasSuffix("shortcut.com")                 { return "Shortcut" }
+
+        // Dev
+        if h.hasSuffix("github.com")                   { return "GitHub" }
+        if h.hasSuffix("gitlab.com")                   { return "GitLab" }
+        if h.hasSuffix("bitbucket.org")                { return "Bitbucket" }
+
+        // Social / professional
+        if h.hasSuffix("linkedin.com")                 { return "LinkedIn" }
+        if h == "twitter.com" || h.hasSuffix(".twitter.com") ||
+           h == "x.com"       || h.hasSuffix(".x.com") { return "X" }
+        if h.hasSuffix("reddit.com")                   { return "Reddit" }
+        if h.hasSuffix("facebook.com")                 { return "Facebook" }
+        if h.hasSuffix("instagram.com")                { return "Instagram" }
+        if h == "threads.net" || h.hasSuffix(".threads.net") { return "Threads" }
+        if h.hasSuffix("bsky.app")                     { return "Bluesky" }
+        if h.hasSuffix("mastodon.social")              { return "Mastodon" }
+
+        // Design / docs / media
+        if h.hasSuffix("figma.com")                    { return "Figma" }
+        if h.hasSuffix("stackoverflow.com")            { return "Stack Overflow" }
+        if h.hasSuffix("medium.com")                   { return "Medium" }
+        if h.hasSuffix("substack.com")                 { return "Substack" }
+        if h.hasSuffix("youtube.com") || h == "youtu.be" { return "YouTube" }
+        if h.hasSuffix("buffer.com")                   { return "Buffer" }
+
+        // Long-tail fallback: title-case the second-level domain.
+        return fallbackBrandFromHost(h)
+    }
+
+    /// Format the History row's `targetApp` string. When `webHost` resolves
+    /// to a brand, append " — Brand". Otherwise return just `appName`.
+    ///   "Google Chrome"            — no host
+    ///   "Google Chrome — Gmail"    — host = mail.google.com
+    ///   "Slack" (not "Slack — Slack") — when brand == app, dedupe
+    static func formatTargetApp(appName: String?, webHost: String?) -> String? {
+        let trimmedApp = appName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let app = (trimmedApp?.isEmpty == false) ? trimmedApp! : nil
+        guard let app else {
+            if let host = webHost, let brand = displayName(forHost: host) { return brand }
+            return nil
+        }
+        guard let host = webHost,
+              let brand = displayName(forHost: host),
+              brand.caseInsensitiveCompare(app) != .orderedSame else {
+            return app
+        }
+        return "\(app) — \(brand)"
+    }
+
+    /// Title-case the second-level domain as a long-tail fallback.
+    /// `figma.com` → "Figma"; `app.something.co.uk` → "Something".
+    private static func fallbackBrandFromHost(_ host: String) -> String? {
+        let parts = host.split(separator: ".").map(String.init)
+        guard parts.count >= 2 else { return nil }
+
+        // Handle common two-part TLDs (.co.uk / .com.au / …) without
+        // pulling in a full PSL. Misses rarities; acceptable.
+        let twoPartTLDSuffixes: Set<String> = [
+            "co.uk", "co.jp", "co.kr", "co.in", "co.nz", "co.za",
+            "com.au", "com.br", "com.mx", "com.sg", "com.hk", "com.tw",
+            "ac.uk", "org.uk", "gov.uk", "ne.jp", "or.jp",
+        ]
+        let lastTwo = parts.suffix(2).joined(separator: ".")
+        let stripCount = twoPartTLDSuffixes.contains(lastTwo) ? 2 : 1
+        guard parts.count > stripCount else { return nil }
+
+        let sld = parts[parts.count - 1 - stripCount]
+        guard !sld.isEmpty else { return nil }
+        return sld.prefix(1).uppercased() + sld.dropFirst()
     }
 }

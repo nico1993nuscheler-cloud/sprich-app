@@ -407,17 +407,23 @@ actor LocalLLMService {
         // Custom mode is user-driven — no contract to enforce, just run
         // the same artifact cleanup as before.
         if mode == .formal {
+            let effectiveSurface: Surface = settings.adaptToSurface ? surface : .generic
             let result = FormalOutputGuard.enforce(
                 pass1Text: sanitizedText,
                 rawLLMOutput: raw,
-                language: settings.preferredLanguage
+                language: settings.preferredLanguage,
+                surface: effectiveSurface
             )
             #if DEBUG
             if result.usedFallback {
                 print("[Sprich] Formal guard fallback (local): \(result.fallbackReason ?? "?")")
             }
             #endif
-            return result.text
+            // Deterministic shape normalisation — ensures email greeting/
+            // sign-off get blank-line framing even when Gemma 3 1B produced
+            // only half the shape (observed 2026-05-29). No-op on
+            // non-email surfaces.
+            return TextPostProcessor.normalizeShape(result.text, surface: effectiveSurface)
         } else {
             let cleaned = FormalOutputGuard.stripWrappingQuotes(
                 FormalOutputGuard.stripPreamble(raw)
