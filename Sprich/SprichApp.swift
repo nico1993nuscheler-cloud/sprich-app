@@ -473,7 +473,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .normal
-        window.collectionBehavior = [.fullScreenAuxiliary]
+        // v1.0.11 testing — Settings sometimes "disappeared into the back"
+        // when focus shifted to Chrome / Mail / Slack. For an .accessory
+        // app, that's standard window-order behavior, but we want the
+        // panel to stay alive so the menubar "Settings…" item can re-front
+        // it without losing UI state. Explicit `hidesOnDeactivate = false`
+        // pins that contract — NSWindow's own default for .titled windows
+        // is already false, but we've been bitten before by a styleMask
+        // change silently flipping it (panels default to true). Keep this
+        // line if styleMask is ever edited.
+        //
+        // We deliberately do NOT set `.floating` here — clearly visible
+        // wins, but it's intrusive when the user has moved Settings aside
+        // to compare against another app. Revisit option #1 (.floating)
+        // or option #3 (pin/unpin toggle) if reports of the panel still
+        // vanishing land after v1.0.12.
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
