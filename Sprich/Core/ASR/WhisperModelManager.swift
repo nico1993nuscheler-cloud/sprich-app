@@ -108,6 +108,28 @@ final class WhisperModelManager: ObservableObject {
     @discardableResult
     func ensureReady(model: String) async throws -> URL {
         if let existing = existingFolder(for: model) {
+            // Bytes are on disk, but the Core ML pipe may not be compiled
+            // yet (fresh app session, or the user re-entered onboarding).
+            // The download path below front-loads prewarm before signalling
+            // `.ready`; this already-present fast path historically skipped
+            // it, which left `isPipeReady` false forever and hung
+            // onboarding's Continue gate (`!isPipeReady`) for ANY returning
+            // user who already had the Whisper model downloaded. Prewarm
+            // here too so `.ready` consistently means "pipe warm", whether
+            // we just downloaded or found the model already on disk.
+            if !isPipeReady {
+                state = .preparing
+                do {
+                    try await TranscriptionService.localWhisper.prewarm(
+                        model: model,
+                        modelFolder: existing
+                    )
+                } catch {
+                    #if DEBUG
+                    print("[Sprich] Prewarm of already-downloaded Whisper failed — will retry on first dictation: \(error)")
+                    #endif
+                }
+            }
             state = .ready(model: model, sizeBytes: folderSize(existing))
             return existing
         }

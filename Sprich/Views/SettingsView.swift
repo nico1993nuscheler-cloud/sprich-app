@@ -149,7 +149,7 @@ struct SettingsView: View {
         .onAppear {
             loadKeys()
             whisperManager.refreshState(for: appState.settings.localWhisperModel)
-            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            llmManager.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
             hardwareTier = HardwareProbe.evaluate()
         }
         .sheet(isPresented: $showModelDownload) {
@@ -178,7 +178,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showLLMDownload) {
             LLMModelDownloadView(
-                spec: LocalLLMModelSpec.defaultSpec,
+                spec: LocalLLMModelSpec.resolved(from: appState.settings),
                 onDone: {
                     showLLMDownload = false
                 },
@@ -1178,7 +1178,7 @@ private struct AIModelsSection: View {
         // button do the work).
         appState.settings.llmProvider = .local
         appState.saveSettings()
-        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.defaultSpec)
+        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
     }
 
     // MARK: Missing-key warning (Sprint 3 polish #9)
@@ -1631,7 +1631,7 @@ private struct LocalProviderConfigView: View {
             switch llmManager.state {
             case .ready:
                 Button("Delete") {
-                    try? llmManager.deleteModel(LocalLLMModelSpec.defaultSpec)
+                    try? llmManager.deleteModel(LocalLLMModelSpec.resolved(from: appState.settings))
                 }
                 .controlSize(.small)
             case .downloading, .verifying:
@@ -1640,7 +1640,7 @@ private struct LocalProviderConfigView: View {
             case .preparing:
                 ProgressView().controlSize(.small)
             default:
-                Button("Download (\(formatBytes(LocalLLMModelSpec.defaultSpec.expectedSize)))") {
+                Button("Download (\(formatBytes(LocalLLMModelSpec.resolved(from: appState.settings).expectedSize)))") {
                     onRequestDownload()
                 }
                 .controlSize(.small)
@@ -1653,7 +1653,7 @@ private struct LocalProviderConfigView: View {
     private var modelDisplayName: String {
         switch kind {
         case .stt: return appState.settings.localWhisperModel
-        case .llm: return LocalLLMModelSpec.defaultSpec.displayName
+        case .llm: return LocalLLMModelSpec.resolved(from: appState.settings).displayName
         }
     }
 
@@ -1753,27 +1753,35 @@ private struct LocalProviderConfigView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             case .llm:
-                // Phase 1 ships Gemma 3 1B only; 2B / 4B placeholders are
-                // disabled so users see the trajectory. Re-enable in a
-                // follow-up sprint when the larger specs land.
+                // Two on-device tiers. High Quality (Gemma 4 E2B, ~3.5 GB)
+                // is the default — fixes the email-shape failures, runs at
+                // ~2 s/dictation with the balanced prompt. Standard
+                // (Gemma 3 1B, ~0.8 GB) is the smaller/faster fallback for
+                // download- or RAM-constrained Macs. Switching tiers writes
+                // the spec ID to settings; LocalLLMService reloads the new
+                // spec on the next dictation, and the Download/Delete row
+                // below acts on whichever tier is selected.
                 Picker("", selection: Binding(
                     get: { appState.settings.localLLMModel },
                     set: { newValue in
+                        let previous = appState.settings.localLLMModel
+                        guard newValue != previous else { return }
                         appState.settings.localLLMModel = newValue
                         appState.saveSettings()
+                        // Reflect the newly-selected tier's on-disk state so
+                        // the row immediately shows Download vs Delete for it.
+                        llmManager.refreshState(for: LocalLLMModelSpec.spec(forID: newValue))
                     }
                 )) {
-                    Text("Gemma 3 1B — 0.8 GB").tag(LocalLLMModelSpec.defaultSpec.id)
-                    Text("Gemma 2 2B — coming soon").tag("gemma-2-2b-it-q4_k_m")
-                    Text("Gemma 3 4B — coming soon").tag("gemma-3-4b-it-q4_k_m")
+                    ForEach(LocalLLMModelSpec.all, id: \.id) { spec in
+                        Text("\(spec.tierName) — \(formatBytes(spec.expectedSize))").tag(spec.id)
+                    }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .disabled(true)
-                if case .eligible = hardwareTier {
-                    Text("Quality presets (2B / 4B) unlock on 16 GB+ Macs in a future update.")
-                        .font(.caption2).foregroundColor(.secondary)
-                }
+                Text(LocalLLMModelSpec.resolved(from: appState.settings).tierNote)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
