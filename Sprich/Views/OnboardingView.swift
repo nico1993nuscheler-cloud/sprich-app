@@ -50,6 +50,16 @@ struct OnboardingView: View {
     @State private var capturedText: String = ""
     @State private var confettiActive: Bool = false
 
+    /// First-install default for "Launch at login" — ON. Sprich is a
+    /// menubar utility that only earns its keep when always-running, so
+    /// we surface this with the toggle visibly ON during the permissions
+    /// step rather than silently registering in `applicationDidFinishLaunching`
+    /// (which would feel sneaky and trips a macOS "Sprich was added to
+    /// Login Items" notification with no visible cause). Existing users
+    /// never see onboarding again so their current SMAppService state is
+    /// preserved — no surprise enrolment on update.
+    @State private var launchAtLoginChoice: Bool = true
+
     private let permissionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let totalSteps = 4
 
@@ -310,9 +320,67 @@ struct OnboardingView: View {
                 }
             )
 
+            launchAtLoginRow
+
             Spacer()
 
-            navRow(primaryLabel: "Continue") { currentStep = 2 }
+            navRow(primaryLabel: "Continue") {
+                applyLaunchAtLoginChoice()
+                currentStep = 2
+            }
+        }
+    }
+
+    /// Visible "Launch at login" toggle on the permissions step. Default
+    /// ON for new installs (a menubar utility is useless when not running).
+    /// Surfacing this with a one-click off ramp here is the deliberate
+    /// alternative to silently registering in AppDelegate — the user can
+    /// see what's being enabled and opt out before it happens.
+    private var launchAtLoginRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "power.circle.fill")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 18))
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Launch at login").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Toggle("", isOn: $launchAtLoginChoice)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                Text("Sprich opens silently in the menubar when you log in — no window pops up. You can change this any time in Settings → General.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.gray.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+
+    /// Apply the on-screen toggle to `SMAppService.mainApp`. Idempotent —
+    /// re-clicking Continue after going Back is safe (register/unregister
+    /// on an already-matching state is a no-op per SMAppService docs).
+    /// Failures are swallowed silently: Settings → General exposes the
+    /// same toggle with a visible error surface, so the user has a
+    /// retry path; blocking onboarding for a login-item hiccup would be
+    /// worse than letting them through.
+    private func applyLaunchAtLoginChoice() {
+        do {
+            try LaunchAtLoginManager.setEnabled(launchAtLoginChoice)
+        } catch {
+            #if DEBUG
+            print("[Sprich][Onboarding] launch-at-login apply failed: \(error)")
+            #endif
         }
     }
 
