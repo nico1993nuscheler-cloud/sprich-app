@@ -491,7 +491,7 @@ struct OnboardingView: View {
             // Refresh local LLM state so the inline P1-UX-18 subsections
             // reflect on-disk truth (e.g. user downloaded earlier and the
             // status badge should already say "Ready").
-            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            llmManager.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
         }
     }
 
@@ -530,7 +530,7 @@ struct OnboardingView: View {
                 localTitle: "On this Mac",
                 localIcon: "laptopcomputer",
                 localSubtitle: "Slower / Cleanup fully on-device",
-                localDescription: "One-time Gemma download (~0.8 GB) + hardware checks.",
+                localDescription: "One-time Gemma download (\(onboardingLLMSizeString)) + hardware checks. Switch to a smaller model anytime in Settings.",
                 onSelectCloud: { llmProviderChoice = .groq },
                 onSelectLocal: { llmProviderChoice = .local }
             )
@@ -582,6 +582,26 @@ struct OnboardingView: View {
         }
     }
 
+    /// The on-device cleanup model onboarding will download — the user's
+    /// selected tier, defaulting to High Quality (Gemma 4 E2B) on a fresh
+    /// install. Keeping this dynamic means the storage disclosure always
+    /// matches what `ensureReady` actually fetches.
+    private var onboardingLLMSpec: LocalLLMModelSpec {
+        LocalLLMModelSpec.resolved(from: appState.settings)
+    }
+
+    /// "~3.5 GB" style label for the selected cleanup model.
+    private var onboardingLLMSizeString: String {
+        "~" + ByteCountFormatter.string(fromByteCount: onboardingLLMSpec.expectedSize, countStyle: .file)
+    }
+
+    /// Whisper (~1.5 GB) + the selected cleanup model, formatted "~5.0 GB".
+    private var onboardingTotalSizeString: String {
+        let whisperBytes: Int64 = 1_610_612_736  // ~1.5 GB, balanced Whisper variant
+        let total = whisperBytes + onboardingLLMSpec.expectedSize
+        return "~" + ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+    }
+
     /// Total install footprint disclosure — non-negotiable per the local-
     /// LLM scoping session ("Disclose total install footprint before any
     /// download starts").
@@ -589,9 +609,9 @@ struct OnboardingView: View {
     private var storageBreakdown: some View {
         VStack(alignment: .leading, spacing: 6) {
             storageRow(label: "Whisper (speech-to-text)", size: "~1.5 GB")
-            storageRow(label: "Gemma 3 1B (AI cleanup)", size: "~0.8 GB")
+            storageRow(label: "\(onboardingLLMSpec.displayName) (AI cleanup)", size: onboardingLLMSizeString)
             Divider().padding(.vertical, 2)
-            storageRow(label: "Total", size: "~2.3 GB", bold: true)
+            storageRow(label: "Total", size: onboardingTotalSizeString, bold: true)
             Text("Both models live in ~/Library/Application Support/Sprich/ and never leave your Mac.")
                 .font(.caption2).foregroundColor(.secondary)
                 .padding(.top, 2)
@@ -642,9 +662,9 @@ struct OnboardingView: View {
             Button("Cancel download") { llmManager.cancelDownload() }
                 .controlSize(.small)
         default:
-            Button("Download AI model now (~0.8 GB)") {
+            Button("Download AI model now (\(ByteCountFormatter.string(fromByteCount: LocalLLMModelSpec.resolved(from: appState.settings).expectedSize, countStyle: .file)))") {
                 Task { @MainActor in
-                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.defaultSpec)
+                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.resolved(from: appState.settings))
                 }
             }
             .buttonStyle(.borderedProminent)

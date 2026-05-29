@@ -136,7 +136,7 @@ actor LocalLLMService {
         // tries to call the hook.
         let service = LocalLLMService.shared
         guard settings.llmProvider.isLocal else { return }
-        let spec = LocalLLMModelSpec.defaultSpec
+        let spec = LocalLLMModelSpec.resolved(from: settings)
         guard let modelFile = LLMModelManager.shared.existingFile(for: spec) else { return }
         Task.detached(priority: .userInitiated) {
             do {
@@ -208,10 +208,12 @@ actor LocalLLMService {
                 topK: 40,
                 topP: 0.95,
                 options: .init(
-                    // Gemma 3 GGUF emits trailing `<end_of_turn>` token
-                    // spam without these stops. Verified 2026-05-16,
-                    // documented in `benchmarks/2026-05-local-llm.md`.
-                    extraEOSTokens: ["<end_of_turn>", "<start_of_turn>"],
+                    // Per-spec stop tokens — Gemma 3 uses `<end_of_turn>` /
+                    // `<start_of_turn>`; Gemma 4 changed them to `<turn|>` /
+                    // `<|turn>`. Sourced from the resolved spec so we never
+                    // serve one family's tokens while running the other.
+                    // Verified 2026-05-16 (G3) / 2026-05-29 (G4).
+                    extraEOSTokens: Set(spec.eosTokens),
                     verbose: false
                 )
             )
@@ -291,11 +293,20 @@ actor LocalLLMService {
             adaptToSurface: settings.adaptToSurface
         )
 
+        // Resolve the user-selected tier (Standard 1B / High Quality E2B)
+        // once for this call. Used for lazy-load AND for the post-cleanup
+        // background reprewarm so we reload the SAME spec the user is on.
+        let activeSpec = LocalLLMModelSpec.resolved(from: settings)
+
         // Lazy-load on cold start — first Formal dictation after launch
         // when prewarm hasn't fired yet. Subsequent calls hit the cached
-        // client.
+        // client. If the loaded client is a DIFFERENT spec than the one the
+        // user just switched to, drop it and load the selected one.
+        if client != nil, loadedSpecID != activeSpec.id {
+            unload()
+        }
         if client == nil {
-            try await loadIfNeeded(spec: LocalLLMModelSpec.defaultSpec)
+            try await loadIfNeeded(spec: activeSpec)
         }
         guard let client else {
             throw SprichError.localLLMNotReady("Model failed to load. Check Settings → Providers → Local LLM, or switch to a cloud provider.")
@@ -382,7 +393,7 @@ actor LocalLLMService {
             print("[Sprich][LocalLLM] generation error, unloading client: \(error)")
             #endif
             unload()
-            scheduleBackgroundPrewarm()
+            scheduleBackgroundPrewarm(spec: activeSpec)
             throw error
         }
 
@@ -398,7 +409,7 @@ actor LocalLLMService {
         // dictation doesn't pay the cold-load latency.
         if earlyStopped {
             unload()
-            scheduleBackgroundPrewarm()
+            scheduleBackgroundPrewarm(spec: activeSpec)
         }
 
         // Formal mode: enforce the two-pass contract (sentence count
@@ -449,8 +460,7 @@ actor LocalLLMService {
     /// user's NEXT dictation can then hit a warm client even though
     /// the previous one poisoned the context. Idempotent — `prewarm`
     /// short-circuits if the client is already loaded.
-    private func scheduleBackgroundPrewarm() {
-        let spec = LocalLLMModelSpec.defaultSpec
+    private func scheduleBackgroundPrewarm(spec: LocalLLMModelSpec = .defaultSpec) {
         Task.detached(priority: .userInitiated) {
             let modelFile = await MainActor.run {
                 LLMModelManager.shared.existingFile(for: spec)

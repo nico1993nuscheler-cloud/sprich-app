@@ -4,14 +4,58 @@ import Foundation
 /// Prevents injection attacks via crafted transcriptions.
 enum InputSanitizer {
 
+    /// Chat-template control-token literals that MUST never reach an LLM as
+    /// real tokens. On the local Gemma path the fully-rendered template
+    /// (system + user) is tokenized in one pass with special-token parsing
+    /// ON, so a dictation containing the literal string `<end_of_turn>` (etc.)
+    /// injects a REAL control token — forging a turn boundary and escaping the
+    /// "rewrite, never fulfill" contract. No system prompt can defend against
+    /// this; it must be neutralized deterministically before tokenization.
+    /// Covers Gemma 3 (`<start_of_turn>`/`<end_of_turn>`), Gemma 4
+    /// (`<turn|>`/`<|turn>`), Llama/ChatML (`<|im_start|>`/`<|im_end|>`/
+    /// `<|eot_id|>`/`<|end_of_text|>`) and BOS/EOS (`<bos>`/`<eos>`/`<s>`/`</s>`).
+    /// Whitespace- and pipe-position-tolerant, case-insensitive. Applied to
+    /// ALL providers (cloud role-separation helps, but several OpenAI-compatible
+    /// tokenizers also honor these). Security audit C1, 2026-05-29.
+    private static let controlTokenPattern: NSRegularExpression? = {
+        let p = #"(?i)<\s*/?\s*\|?\s*(?:start_of_turn|end_of_turn|turn|bos|eos|s|im_start|im_end|eot_id|end_of_text|endoftext)\s*\|?\s*>"#
+        return try? NSRegularExpression(pattern: p)
+    }()
+
+    /// Invisible / zero-width / format scalars that can smuggle instructions
+    /// past human review (homoglyph & invisible-instruction attacks). Whisper
+    /// never produces these from speech, but the glossary, Custom-prompt field,
+    /// and clipboard-driven hotkey macros are non-voice text paths. Security
+    /// audit M3, 2026-05-29. (Bidi overrides U+202A–202E / U+2066–2069 are
+    /// handled separately for the paste path.)
+    private static func isInvisibleFormatScalar(_ v: UInt32) -> Bool {
+        (v >= 0x200B && v <= 0x200F) ||   // zero-width space..RLM
+        (v >= 0x2060 && v <= 0x2064) ||   // word-joiner..invisible-plus
+        v == 0xFEFF ||                     // zero-width no-break space / BOM
+        (v >= 0xE0000 && v <= 0xE007F)     // Unicode Tag block (invisible instructions)
+    }
+
     /// Remove control characters and potential injection patterns from transcript text.
     static func sanitize(_ text: String) -> String {
         var sanitized = text
 
-        // Remove control characters (except newline and tab)
+        // Neutralize chat-template control-token literals BEFORE anything else
+        // so a forged `<end_of_turn>`/`<|im_end|>`/etc. can never become a real
+        // token downstream. Removed outright — legitimate dictation never
+        // contains these exact bracketed tokens. (Audit C1.)
+        if let regex = controlTokenPattern {
+            let range = NSRange(sanitized.startIndex..., in: sanitized)
+            sanitized = regex.stringByReplacingMatches(in: sanitized, range: range, withTemplate: " ")
+        }
+
+        // Remove control characters (except newline and tab) AND invisible
+        // format/zero-width scalars (audit M3).
         sanitized = sanitized.unicodeScalars
             .filter { scalar in
-                scalar == "\n" || scalar == "\t" || !CharacterSet.controlCharacters.contains(scalar)
+                if scalar == "\n" || scalar == "\t" { return true }
+                if CharacterSet.controlCharacters.contains(scalar) { return false }
+                if isInvisibleFormatScalar(scalar.value) { return false }
+                return true
             }
             .map { String($0) }
             .joined()
@@ -64,6 +108,8 @@ enum InputSanitizer {
             if (v >= 0x202A && v <= 0x202E) || (v >= 0x2066 && v <= 0x2069) {
                 continue
             }
+            // Invisible / zero-width / Tag-block format scalars (audit M3).
+            if isInvisibleFormatScalar(v) { continue }
             out.append(scalar)
         }
 
