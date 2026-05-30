@@ -324,7 +324,17 @@ struct OnboardingView: View {
 
             Spacer()
 
-            navRow(primaryLabel: "Continue") {
+            // Gate advancing on BOTH permissions: without Accessibility the
+            // global hotkey is dead (hotkeys disabled), and without the mic
+            // there's no audio — so "Try it now" on the next cards would
+            // silently do nothing. Blocking here is what prevents the
+            // "I press the shortcut and nothing happens" dead end.
+            navRow(
+                primaryLabel: accessibilityGranted && microphoneGranted
+                    ? "Continue"
+                    : "Grant both permissions to continue",
+                primaryDisabled: !(accessibilityGranted && microphoneGranted)
+            ) {
                 applyLaunchAtLoginChoice()
                 currentStep = 2
             }
@@ -429,35 +439,32 @@ struct OnboardingView: View {
 
     // MARK: - Step 2 — Provider (Speech recognition + AI cleanup)
 
-    /// Sprint 3 P1-UX-17 + P1-UX-18: two stacked `ProviderCardPair` cards
-    /// (Speech recognition + AI cleanup), each surfacing the same Cloud /
-    /// On-this-Mac selector that Settings → AI Models uses. One design
-    /// pattern from first launch through Settings (Decision 2 in
-    /// sprint-3-settings-ux.md).
+    /// Single local-vs-cloud choice that configures BOTH speech recognition
+    /// and AI cleanup at once — restores the pre-P1-UX-17 simplified
+    /// onboarding (one decision; the model download OR the API-key field is
+    /// revealed by the choice). Users can still split STT and LLM providers
+    /// independently later in Settings → AI Models.
     private var providerPreparingStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Pick where the AI runs")
+                Text("Pick where Sprich runs")
                     .font(.title2).fontWeight(.semibold)
 
-                Text("You can change either of these later in Settings → AI Models.")
+                Text("One choice sets up both speech recognition and AI cleanup. You can fine-tune each separately later in Settings → AI Models.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                speechRecognitionPair
+                whereAIRunsPair
 
-                if providerChoice == .local {
+                if providerChoice.isLocal {
+                    // Local: Whisper warmup strip + on-device cleanup-model
+                    // download / hardware eligibility.
                     preparingStrip
-                }
-
-                aiCleanupPair
-
-                if llmProviderChoice.isLocal {
                     localLLMNoteInOnboarding
-                }
-
-                if providerChoice == .groq || llmProviderChoice == .groq {
+                } else {
+                    // Cloud: a single Groq key powers both transcription and
+                    // cleanup.
                     groqKeyField
                 }
 
@@ -488,53 +495,32 @@ struct OnboardingView: View {
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
             }
-            // Refresh local LLM state so the inline P1-UX-18 subsections
-            // reflect on-disk truth (e.g. user downloaded earlier and the
-            // status badge should already say "Ready").
+            // Refresh local LLM state so the inline subsections reflect
+            // on-disk truth (e.g. a model downloaded earlier already shows
+            // "Ready").
             llmManager.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
         }
     }
 
+    /// The single local/cloud selector. Selecting a side sets BOTH the STT
+    /// and LLM provider to that side, so the rest of onboarding (gating +
+    /// commit) sees one coherent choice. This is the simplified single-card
+    /// flow restored from the pre-P1-UX-17 design.
     @ViewBuilder
-    private var speechRecognitionPair: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Speech recognition")
-                .font(.system(size: 13, weight: .semibold))
-            ProviderCardPair(
-                isLocalSelected: providerChoice.isLocal,
-                cloudTitle: "Cloud",
-                cloudIcon: "cloud",
-                cloudSubtitle: "Fastest / Highest quality / API key required",
-                cloudDescription: "Audio sent to chosen provider for transcription.",
-                localTitle: "On this Mac",
-                localIcon: "laptopcomputer",
-                localSubtitle: "Slower / Transcription fully on-device",
-                localDescription: "One-time Whisper model download (~600 MB).",
-                onSelectCloud: { providerChoice = .groq },
-                onSelectLocal: { providerChoice = .local }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var aiCleanupPair: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("AI cleanup (Formal + Custom modes)")
-                .font(.system(size: 13, weight: .semibold))
-            ProviderCardPair(
-                isLocalSelected: llmProviderChoice.isLocal,
-                cloudTitle: "Cloud",
-                cloudIcon: "cloud",
-                cloudSubtitle: "Fastest / Highest quality / API key required",
-                cloudDescription: "Transcribed text sent to chosen provider for cleanup. No storage.",
-                localTitle: "On this Mac",
-                localIcon: "laptopcomputer",
-                localSubtitle: "Slower / Cleanup fully on-device",
-                localDescription: "One-time Gemma download (\(onboardingLLMSizeString)) + hardware checks. Switch to a smaller model anytime in Settings.",
-                onSelectCloud: { llmProviderChoice = .groq },
-                onSelectLocal: { llmProviderChoice = .local }
-            )
-        }
+    private var whereAIRunsPair: some View {
+        ProviderCardPair(
+            isLocalSelected: providerChoice.isLocal,
+            cloudTitle: "Cloud",
+            cloudIcon: "cloud",
+            cloudSubtitle: "Fastest / Highest quality / API key required",
+            cloudDescription: "Audio and text are sent to your provider (Groq) for transcription and cleanup. No downloads, no storage.",
+            localTitle: "On this Mac",
+            localIcon: "laptopcomputer",
+            localSubtitle: "Fully private / Runs entirely on-device",
+            localDescription: "One-time \(onboardingTotalSizeString) download (Whisper + Gemma). Nothing ever leaves your Mac.",
+            onSelectCloud: { providerChoice = .groq; llmProviderChoice = .groq },
+            onSelectLocal: { providerChoice = .local; llmProviderChoice = .local }
+        )
     }
 
     /// On-Mac AI cleanup subsections (P1-UX-18). Replaces the standalone
