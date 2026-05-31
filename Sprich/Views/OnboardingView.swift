@@ -50,6 +50,16 @@ struct OnboardingView: View {
     @State private var capturedText: String = ""
     @State private var confettiActive: Bool = false
 
+    /// First-install default for "Launch at login" — ON. Sprich is a
+    /// menubar utility that only earns its keep when always-running, so
+    /// we surface this with the toggle visibly ON during the permissions
+    /// step rather than silently registering in `applicationDidFinishLaunching`
+    /// (which would feel sneaky and trips a macOS "Sprich was added to
+    /// Login Items" notification with no visible cause). Existing users
+    /// never see onboarding again so their current SMAppService state is
+    /// preserved — no surprise enrolment on update.
+    @State private var launchAtLoginChoice: Bool = true
+
     private let permissionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let totalSteps = 4
 
@@ -310,9 +320,77 @@ struct OnboardingView: View {
                 }
             )
 
+            launchAtLoginRow
+
             Spacer()
 
-            navRow(primaryLabel: "Continue") { currentStep = 2 }
+            // Gate advancing on BOTH permissions: without Accessibility the
+            // global hotkey is dead (hotkeys disabled), and without the mic
+            // there's no audio — so "Try it now" on the next cards would
+            // silently do nothing. Blocking here is what prevents the
+            // "I press the shortcut and nothing happens" dead end.
+            navRow(
+                primaryLabel: accessibilityGranted && microphoneGranted
+                    ? "Continue"
+                    : "Grant both permissions to continue",
+                primaryDisabled: !(accessibilityGranted && microphoneGranted)
+            ) {
+                applyLaunchAtLoginChoice()
+                currentStep = 2
+            }
+        }
+    }
+
+    /// Visible "Launch at login" toggle on the permissions step. Default
+    /// ON for new installs (a menubar utility is useless when not running).
+    /// Surfacing this with a one-click off ramp here is the deliberate
+    /// alternative to silently registering in AppDelegate — the user can
+    /// see what's being enabled and opt out before it happens.
+    private var launchAtLoginRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "power.circle.fill")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 18))
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Launch at login").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Toggle("", isOn: $launchAtLoginChoice)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+                Text("Sprich opens silently in the menubar when you log in — no window pops up. You can change this any time in Settings → General.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.gray.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+
+    /// Apply the on-screen toggle to `SMAppService.mainApp`. Idempotent —
+    /// re-clicking Continue after going Back is safe (register/unregister
+    /// on an already-matching state is a no-op per SMAppService docs).
+    /// Failures are swallowed silently: Settings → General exposes the
+    /// same toggle with a visible error surface, so the user has a
+    /// retry path; blocking onboarding for a login-item hiccup would be
+    /// worse than letting them through.
+    private func applyLaunchAtLoginChoice() {
+        do {
+            try LaunchAtLoginManager.setEnabled(launchAtLoginChoice)
+        } catch {
+            #if DEBUG
+            print("[Sprich][Onboarding] launch-at-login apply failed: \(error)")
+            #endif
         }
     }
 
@@ -361,35 +439,32 @@ struct OnboardingView: View {
 
     // MARK: - Step 2 — Provider (Speech recognition + AI cleanup)
 
-    /// Sprint 3 P1-UX-17 + P1-UX-18: two stacked `ProviderCardPair` cards
-    /// (Speech recognition + AI cleanup), each surfacing the same Cloud /
-    /// On-this-Mac selector that Settings → AI Models uses. One design
-    /// pattern from first launch through Settings (Decision 2 in
-    /// sprint-3-settings-ux.md).
+    /// Single local-vs-cloud choice that configures BOTH speech recognition
+    /// and AI cleanup at once — restores the pre-P1-UX-17 simplified
+    /// onboarding (one decision; the model download OR the API-key field is
+    /// revealed by the choice). Users can still split STT and LLM providers
+    /// independently later in Settings → AI Models.
     private var providerPreparingStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Pick where the AI runs")
+                Text("Pick where Sprich runs")
                     .font(.title2).fontWeight(.semibold)
 
-                Text("You can change either of these later in Settings → AI Models.")
+                Text("One choice sets up both speech recognition and AI cleanup. You can fine-tune each separately later in Settings → AI Models.")
                     .font(.callout)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                speechRecognitionPair
+                whereAIRunsPair
 
-                if providerChoice == .local {
+                if providerChoice.isLocal {
+                    // Local: Whisper warmup strip + on-device cleanup-model
+                    // download / hardware eligibility.
                     preparingStrip
-                }
-
-                aiCleanupPair
-
-                if llmProviderChoice.isLocal {
                     localLLMNoteInOnboarding
-                }
-
-                if providerChoice == .groq || llmProviderChoice == .groq {
+                } else {
+                    // Cloud: a single Groq key powers both transcription and
+                    // cleanup.
                     groqKeyField
                 }
 
@@ -420,53 +495,32 @@ struct OnboardingView: View {
                     try? await WhisperModelManager.shared.ensureReady(model: model)
                 }
             }
-            // Refresh local LLM state so the inline P1-UX-18 subsections
-            // reflect on-disk truth (e.g. user downloaded earlier and the
-            // status badge should already say "Ready").
-            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            // Refresh local LLM state so the inline subsections reflect
+            // on-disk truth (e.g. a model downloaded earlier already shows
+            // "Ready").
+            llmManager.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
         }
     }
 
+    /// The single local/cloud selector. Selecting a side sets BOTH the STT
+    /// and LLM provider to that side, so the rest of onboarding (gating +
+    /// commit) sees one coherent choice. This is the simplified single-card
+    /// flow restored from the pre-P1-UX-17 design.
     @ViewBuilder
-    private var speechRecognitionPair: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Speech recognition")
-                .font(.system(size: 13, weight: .semibold))
-            ProviderCardPair(
-                isLocalSelected: providerChoice.isLocal,
-                cloudTitle: "Cloud",
-                cloudIcon: "cloud",
-                cloudSubtitle: "Fastest / Highest quality / API key required",
-                cloudDescription: "Audio sent to chosen provider for transcription.",
-                localTitle: "On this Mac",
-                localIcon: "laptopcomputer",
-                localSubtitle: "Slower / Transcription fully on-device",
-                localDescription: "One-time Whisper model download (~600 MB).",
-                onSelectCloud: { providerChoice = .groq },
-                onSelectLocal: { providerChoice = .local }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var aiCleanupPair: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("AI cleanup (Formal + Custom modes)")
-                .font(.system(size: 13, weight: .semibold))
-            ProviderCardPair(
-                isLocalSelected: llmProviderChoice.isLocal,
-                cloudTitle: "Cloud",
-                cloudIcon: "cloud",
-                cloudSubtitle: "Fastest / Highest quality / API key required",
-                cloudDescription: "Transcribed text sent to chosen provider for cleanup. No storage.",
-                localTitle: "On this Mac",
-                localIcon: "laptopcomputer",
-                localSubtitle: "Slower / Cleanup fully on-device",
-                localDescription: "One-time Gemma download (~0.8 GB) + hardware checks.",
-                onSelectCloud: { llmProviderChoice = .groq },
-                onSelectLocal: { llmProviderChoice = .local }
-            )
-        }
+    private var whereAIRunsPair: some View {
+        ProviderCardPair(
+            isLocalSelected: providerChoice.isLocal,
+            cloudTitle: "Cloud",
+            cloudIcon: "cloud",
+            cloudSubtitle: "Fastest / Highest quality / API key required",
+            cloudDescription: "Audio and text are sent to your provider (Groq) for transcription and cleanup. No downloads, no storage.",
+            localTitle: "On this Mac",
+            localIcon: "laptopcomputer",
+            localSubtitle: "Fully private / Runs entirely on-device",
+            localDescription: "One-time \(onboardingTotalSizeString) download (Whisper + Gemma). Nothing ever leaves your Mac.",
+            onSelectCloud: { providerChoice = .groq; llmProviderChoice = .groq },
+            onSelectLocal: { providerChoice = .local; llmProviderChoice = .local }
+        )
     }
 
     /// On-Mac AI cleanup subsections (P1-UX-18). Replaces the standalone
@@ -514,6 +568,26 @@ struct OnboardingView: View {
         }
     }
 
+    /// The on-device cleanup model onboarding will download — the user's
+    /// selected tier, defaulting to High Quality (Gemma 4 E2B) on a fresh
+    /// install. Keeping this dynamic means the storage disclosure always
+    /// matches what `ensureReady` actually fetches.
+    private var onboardingLLMSpec: LocalLLMModelSpec {
+        LocalLLMModelSpec.resolved(from: appState.settings)
+    }
+
+    /// "~3.5 GB" style label for the selected cleanup model.
+    private var onboardingLLMSizeString: String {
+        "~" + ByteCountFormatter.string(fromByteCount: onboardingLLMSpec.expectedSize, countStyle: .file)
+    }
+
+    /// Whisper (~1.5 GB) + the selected cleanup model, formatted "~5.0 GB".
+    private var onboardingTotalSizeString: String {
+        let whisperBytes: Int64 = 1_610_612_736  // ~1.5 GB, balanced Whisper variant
+        let total = whisperBytes + onboardingLLMSpec.expectedSize
+        return "~" + ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+    }
+
     /// Total install footprint disclosure — non-negotiable per the local-
     /// LLM scoping session ("Disclose total install footprint before any
     /// download starts").
@@ -521,9 +595,9 @@ struct OnboardingView: View {
     private var storageBreakdown: some View {
         VStack(alignment: .leading, spacing: 6) {
             storageRow(label: "Whisper (speech-to-text)", size: "~1.5 GB")
-            storageRow(label: "Gemma 3 1B (AI cleanup)", size: "~0.8 GB")
+            storageRow(label: "\(onboardingLLMSpec.displayName) (AI cleanup)", size: onboardingLLMSizeString)
             Divider().padding(.vertical, 2)
-            storageRow(label: "Total", size: "~2.3 GB", bold: true)
+            storageRow(label: "Total", size: onboardingTotalSizeString, bold: true)
             Text("Both models live in ~/Library/Application Support/Sprich/ and never leave your Mac.")
                 .font(.caption2).foregroundColor(.secondary)
                 .padding(.top, 2)
@@ -574,9 +648,9 @@ struct OnboardingView: View {
             Button("Cancel download") { llmManager.cancelDownload() }
                 .controlSize(.small)
         default:
-            Button("Download AI model now (~0.8 GB)") {
+            Button("Download AI model now (\(ByteCountFormatter.string(fromByteCount: LocalLLMModelSpec.resolved(from: appState.settings).expectedSize, countStyle: .file)))") {
                 Task { @MainActor in
-                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.defaultSpec)
+                    try? await llmManager.ensureReady(spec: LocalLLMModelSpec.resolved(from: appState.settings))
                 }
             }
             .buttonStyle(.borderedProminent)

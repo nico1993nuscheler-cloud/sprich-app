@@ -21,34 +21,35 @@ enum SettingsSection: String, Hashable, CaseIterable, Identifiable {
     case modes
     case dictionary
     case general
-    case privacy
-    case about
+    // v1.0.12: merged former `.privacy` + `.about` cases into one. Both
+    // were thin and the IA reads cleaner with a single sidebar row. See
+    // `AboutPrivacySection` for the merged content; no persisted callers
+    // referenced the old raw values (verified).
+    case aboutPrivacy
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .history:    return "History"
-        case .account:    return "Account"
-        case .aiModels:   return "AI Models"
-        case .modes:      return "Modes"
-        case .dictionary: return "Dictionary"
-        case .general:    return "General"
-        case .privacy:    return "Privacy"
-        case .about:      return "About"
+        case .history:      return "History"
+        case .account:      return "Account"
+        case .aiModels:     return "AI Models"
+        case .modes:        return "Modes"
+        case .dictionary:   return "Dictionary"
+        case .general:      return "General"
+        case .aboutPrivacy: return "About & Privacy"
         }
     }
 
     var iconName: String {
         switch self {
-        case .history:    return "clock.arrow.circlepath"
-        case .account:    return "person.crop.circle"
-        case .aiModels:   return "brain"
-        case .modes:      return "text.quote"
-        case .dictionary: return "text.book.closed"
-        case .general:    return "gear"
-        case .privacy:    return "lock.shield"
-        case .about:      return "info.circle"
+        case .history:      return "clock.arrow.circlepath"
+        case .account:      return "person.crop.circle"
+        case .aiModels:     return "brain"
+        case .modes:        return "text.quote"
+        case .dictionary:   return "text.book.closed"
+        case .general:      return "gear"
+        case .aboutPrivacy: return "info.circle"
         }
     }
 }
@@ -132,9 +133,8 @@ struct SettingsView: View {
                     .environmentObject(appState)
                 case .modes:      ModesSection().environmentObject(appState)
                 case .dictionary: DictionarySection().environmentObject(appState)
-                case .general:    GeneralSection().environmentObject(appState)
-                case .privacy:    PrivacySection()
-                case .about:      AboutSection()
+                case .general:      GeneralSection().environmentObject(appState)
+                case .aboutPrivacy: AboutPrivacySection()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -149,7 +149,7 @@ struct SettingsView: View {
         .onAppear {
             loadKeys()
             whisperManager.refreshState(for: appState.settings.localWhisperModel)
-            llmManager.refreshState(for: LocalLLMModelSpec.defaultSpec)
+            llmManager.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
             hardwareTier = HardwareProbe.evaluate()
         }
         .sheet(isPresented: $showModelDownload) {
@@ -178,7 +178,7 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showLLMDownload) {
             LLMModelDownloadView(
-                spec: LocalLLMModelSpec.defaultSpec,
+                spec: LocalLLMModelSpec.resolved(from: appState.settings),
                 onDone: {
                     showLLMDownload = false
                 },
@@ -390,7 +390,7 @@ private struct AccountSection: View {
 
 /// Shared card chrome used by every sidebar section. Pulled out of
 /// SettingsView's private helper so AccountSection / GeneralSection /
-/// ModesSection / PrivacySection / AboutSection can share one component.
+/// ModesSection / AboutPrivacySection can share one component.
 struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
 
@@ -428,24 +428,73 @@ struct SettingsSectionHeader: View {
     }
 }
 
-// MARK: - PrivacySection (P1-UX-11)
+// MARK: - AboutPrivacySection (v1.0.12)
 
-/// Per Decision 4 in sprint-3-settings-ux.md: two cards only.
-/// The live NetworkStatusIndicator is the hero; the inventory link is
-/// the secondary path for skeptics. The "What Sprich never sends" 4-row
-/// checklist that Nico called wishiwashi is cut. The Gemma attribution
-/// string moved to AboutSection (still legally mandatory, just lives
-/// where attribution belongs).
-private struct PrivacySection: View {
+/// Merged About + Privacy section. Both halves were thin (a handful of
+/// short cards) and the sidebar IA reads cleaner with one row labelled
+/// "About & Privacy" than two near-empty ones.
+///
+/// Card order: app identity → privacy (network status hero + inventory)
+/// → attributions → legal → support. The two privacy cards keep their
+/// original copy verbatim; the inline "Network status" label with the
+/// lock-shield glyph disambiguates them inside the wider section.
+///
+/// Historical anchors: PrivacySection (P1-UX-11) — Decision 4 in
+/// sprint-3-settings-ux.md, network-status hero + inventory link, Gemma
+/// attribution relocated to About. AboutSection (P1-UX-12) — dynamic
+/// version (UX audit P0 #5 fix), trial/licensed state row (P0 #4 surface),
+/// mandatory Gemma Terms string (Sprint 2F locked decision).
+private struct AboutPrivacySection: View {
+    @StateObject private var trial = TrialState.shared
     @ObservedObject private var networkIndicator = NetworkStatusIndicator.shared
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                SettingsSectionHeader(icon: "lock.shield", title: "Privacy")
+                SettingsSectionHeader(icon: "info.circle", title: "About & Privacy")
 
                 SettingsCard {
-                    Text("Network status")
+                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
+                    HStack(spacing: 12) {
+                        Image("SprichLogo")
+                            .resizable()
+                            .frame(width: 40, height: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Sprich").font(.system(size: 15, weight: .semibold))
+                            Text("Version \(appVersion)")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("Speech-to-text for macOS")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    // Trial / licensed state row (UX audit P0 #4 surface).
+                    switch trial.entitlement {
+                    case .trialActive:
+                        Divider().padding(.vertical, 4)
+                        HStack {
+                            Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
+                                .font(.caption)
+                            Spacer()
+                            Button("Upgrade to lifetime") {
+                                NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    case .licensed:
+                        Divider().padding(.vertical, 4)
+                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
+                        EmptyView()
+                    }
+                }
+
+                SettingsCard {
+                    Label("Network status", systemImage: "lock.shield")
                         .font(.caption).foregroundColor(.secondary)
 
                     HStack(alignment: .top, spacing: 12) {
@@ -493,80 +542,6 @@ private struct PrivacySection: View {
                     .padding(.top, 2)
                 }
 
-                Spacer(minLength: 0)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-    }
-
-    /// Present-tense framing for the static Settings card (the recording
-    /// overlay uses past-tense "stayed" to confirm what just happened).
-    private var networkStatusStaticCopy: String {
-        switch networkIndicator.route {
-        case .offline:
-            return "Sprich is configured to keep your audio and text on this Mac."
-        default:
-            return networkIndicator.route.tooltip
-        }
-    }
-}
-
-// MARK: - AboutSection (P1-UX-12)
-
-/// Version (dynamic, not hardcoded — UX audit P0 #5 fix) + Sprich
-/// tagline + trial/licensed state row + AI model attributions
-/// (Whisper + Gemma) including the legally mandatory Gemma Terms
-/// reference string (Sprint 2F locked decision: lives somewhere; moved
-/// here from Privacy per Decision 4).
-private struct AboutSection: View {
-    @StateObject private var trial = TrialState.shared
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                SettingsSectionHeader(icon: "info.circle", title: "About")
-
-                SettingsCard {
-                    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?.?.?"
-                    HStack(spacing: 12) {
-                        Image("SprichLogo")
-                            .resizable()
-                            .frame(width: 40, height: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Sprich").font(.system(size: 15, weight: .semibold))
-                            Text("Version \(appVersion)")
-                                .font(.caption).foregroundColor(.secondary)
-                            Text("Speech-to-text for macOS")
-                                .font(.caption).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                    }
-
-                    // Trial / licensed state row (UX audit P0 #4 surface).
-                    switch trial.entitlement {
-                    case .trialActive:
-                        Divider().padding(.vertical, 4)
-                        HStack {
-                            Text("Trial — \(trial.daysRemaining) day\(trial.daysRemaining == 1 ? "" : "s") left")
-                                .font(.caption)
-                            Spacer()
-                            Button("Upgrade to lifetime") {
-                                NSWorkspace.shared.open(URL(string: "https://sprichapp.com/pricing")!)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    case .licensed:
-                        Divider().padding(.vertical, 4)
-                        Label("Lifetime license active", systemImage: "checkmark.seal.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    case .trialExpired, .signedOut, .unknown, .deviceBlocked:
-                        EmptyView()
-                    }
-                }
-
                 SettingsCard {
                     Text("AI model attributions")
                         .font(.caption).foregroundColor(.secondary)
@@ -578,7 +553,6 @@ private struct AboutSection: View {
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                         // Sprint 2F mandatory Gemma attribution string (verbatim).
-                        // Relocated from the Privacy tab to About per Decision 4.
                         Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -615,6 +589,17 @@ private struct AboutSection: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+
+    /// Present-tense framing for the static Settings card (the recording
+    /// overlay uses past-tense "stayed" to confirm what just happened).
+    private var networkStatusStaticCopy: String {
+        switch networkIndicator.route {
+        case .offline:
+            return "Sprich is configured to keep your audio and text on this Mac."
+        default:
+            return networkIndicator.route.tooltip
         }
     }
 }
@@ -1193,7 +1178,7 @@ private struct AIModelsSection: View {
         // button do the work).
         appState.settings.llmProvider = .local
         appState.saveSettings()
-        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.defaultSpec)
+        LLMModelManager.shared.refreshState(for: LocalLLMModelSpec.resolved(from: appState.settings))
     }
 
     // MARK: Missing-key warning (Sprint 3 polish #9)
@@ -1646,7 +1631,7 @@ private struct LocalProviderConfigView: View {
             switch llmManager.state {
             case .ready:
                 Button("Delete") {
-                    try? llmManager.deleteModel(LocalLLMModelSpec.defaultSpec)
+                    try? llmManager.deleteModel(LocalLLMModelSpec.resolved(from: appState.settings))
                 }
                 .controlSize(.small)
             case .downloading, .verifying:
@@ -1655,7 +1640,7 @@ private struct LocalProviderConfigView: View {
             case .preparing:
                 ProgressView().controlSize(.small)
             default:
-                Button("Download (\(formatBytes(LocalLLMModelSpec.defaultSpec.expectedSize)))") {
+                Button("Download (\(formatBytes(LocalLLMModelSpec.resolved(from: appState.settings).expectedSize)))") {
                     onRequestDownload()
                 }
                 .controlSize(.small)
@@ -1668,7 +1653,7 @@ private struct LocalProviderConfigView: View {
     private var modelDisplayName: String {
         switch kind {
         case .stt: return appState.settings.localWhisperModel
-        case .llm: return LocalLLMModelSpec.defaultSpec.displayName
+        case .llm: return LocalLLMModelSpec.resolved(from: appState.settings).displayName
         }
     }
 
@@ -1768,27 +1753,35 @@ private struct LocalProviderConfigView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             case .llm:
-                // Phase 1 ships Gemma 3 1B only; 2B / 4B placeholders are
-                // disabled so users see the trajectory. Re-enable in a
-                // follow-up sprint when the larger specs land.
+                // Two on-device tiers. High Quality (Gemma 4 E2B, ~3.5 GB)
+                // is the default — fixes the email-shape failures, runs at
+                // ~2 s/dictation with the balanced prompt. Standard
+                // (Gemma 3 1B, ~0.8 GB) is the smaller/faster fallback for
+                // download- or RAM-constrained Macs. Switching tiers writes
+                // the spec ID to settings; LocalLLMService reloads the new
+                // spec on the next dictation, and the Download/Delete row
+                // below acts on whichever tier is selected.
                 Picker("", selection: Binding(
                     get: { appState.settings.localLLMModel },
                     set: { newValue in
+                        let previous = appState.settings.localLLMModel
+                        guard newValue != previous else { return }
                         appState.settings.localLLMModel = newValue
                         appState.saveSettings()
+                        // Reflect the newly-selected tier's on-disk state so
+                        // the row immediately shows Download vs Delete for it.
+                        llmManager.refreshState(for: LocalLLMModelSpec.spec(forID: newValue))
                     }
                 )) {
-                    Text("Gemma 3 1B — 0.8 GB").tag(LocalLLMModelSpec.defaultSpec.id)
-                    Text("Gemma 2 2B — coming soon").tag("gemma-2-2b-it-q4_k_m")
-                    Text("Gemma 3 4B — coming soon").tag("gemma-3-4b-it-q4_k_m")
+                    ForEach(LocalLLMModelSpec.all, id: \.id) { spec in
+                        Text("\(spec.tierName) — \(formatBytes(spec.expectedSize))").tag(spec.id)
+                    }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .disabled(true)
-                if case .eligible = hardwareTier {
-                    Text("Quality presets (2B / 4B) unlock on 16 GB+ Macs in a future update.")
-                        .font(.caption2).foregroundColor(.secondary)
-                }
+                Text(LocalLLMModelSpec.resolved(from: appState.settings).tierNote)
+                    .font(.caption2).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
