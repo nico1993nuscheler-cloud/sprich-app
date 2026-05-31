@@ -59,13 +59,18 @@ actor LocalLLMService {
     ///     capped at 1024)
     ///   - Chat-template overhead + safety margin
     ///
-    /// History: 2048 → 4096 (2026-05-26) → 8192 (2026-05-27). The 4096
-    /// bump still saw `context size exceeded[4096 < 4140]` on Formal +
-    /// email surface for a normal-length dictation; 8192 leaves ~3000
-    /// tokens of headroom in the worst observed case. Gemma 3 1B
-    /// supports 32k natively; ~80 MB extra KV cache is a cheap fix and
-    /// gets us out of the "tune the context every release" cycle.
-    static let contextSize: Int = 8192
+    /// History: 2048 → 4096 (2026-05-26) → 8192 (2026-05-27) → 16384
+    /// (2026-05-31). The 8192 bump still threw a USER-FACING
+    /// `context size exceeded[8192 < 8516]` on Gemma 4 E2B + the `aiChat`
+    /// surface (ChatGPT/Gemini), where the longer composed prompt + output
+    /// budget overran the window — surfaced as a hard "Sprich Error" instead
+    /// of a silent Pass-1 fallback. 16384 gives ~8000 tokens of headroom in
+    /// the worst observed case. Both Gemma 3 1B (32k) and Gemma 4 E2B (128k)
+    /// support this natively; the extra KV cache (~160 MB) is a cheap fix and
+    /// gets us out of the "tune the context every release" cycle. NOTE: the
+    /// v1.0.13 balanced-prompt trim (~700 tok vs ~1700) makes overflow far
+    /// less likely regardless.
+    static let contextSize: Int = 16384
 
     /// Safety margin (tokens) reserved on top of the conservative
     /// input+output token estimate when deciding whether a dictation
