@@ -7,6 +7,93 @@ extension Notification.Name {
     static let sprichOnboardingComplete = Notification.Name("sprich.onboardingComplete")
 }
 
+/// Custom-drawn two-color toggle track. Unlike `NSSwitch` (grey when "off"),
+/// it's FILLED in BOTH positions so neither side reads as "disabled" — the
+/// whole point: running on-device must never look like Sprich is turned off.
+/// Green = On this Mac, Blue = Cloud. (Swap the two `NSColor`s below to
+/// re-theme.) When not interactive it dims but keeps the active color.
+@MainActor
+final class ColorToggleTrack: NSView {
+    // Match the established local/cloud coding used by the Network-status
+    // card + menubar glyph (🟢 on-device / 🟡 cloud): green / amber.
+    static let localColor = NSColor.systemGreen
+    static let cloudColor = NSColor.systemOrange
+
+    var isCloud = false { didSet { needsDisplay = true } }
+    var dimmed = false { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let radius = bounds.height / 2
+        let track = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
+        var color = isCloud ? Self.cloudColor : Self.localColor
+        if dimmed { color = color.withAlphaComponent(0.4) }
+        color.setFill()
+        track.fill()
+
+        let d = bounds.height - 4
+        let x = isCloud ? bounds.width - d - 2 : 2
+        let knob = NSBezierPath(ovalIn: NSRect(x: x, y: 2, width: d, height: d))
+        (dimmed ? NSColor.white.withAlphaComponent(0.8) : NSColor.white).setFill()
+        knob.fill()
+    }
+}
+
+/// The menubar Local⇄Cloud quick switch (v1.0.13). A two-color toggle flanked
+/// by "On this Mac" / "Cloud" labels, hosted as a menu item's custom view so
+/// it's always visible. Left/green = On this Mac, right/blue = Cloud.
+/// `onChange(isCloud)` fires on user flips.
+@MainActor
+final class ProcessingToggleView: NSView {
+    private let localLabel = NSTextField(labelWithString: "On this Mac")
+    private let cloudLabel = NSTextField(labelWithString: "Cloud")
+    private let track = ColorToggleTrack()
+    private var isInteractive = false
+    var onChange: ((Bool) -> Void)?
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 226, height: 26))
+        let font = NSFont.menuFont(ofSize: 0)
+        localLabel.font = font
+        cloudLabel.font = font
+        localLabel.frame = NSRect(x: 14, y: 4, width: 84, height: 18)
+        track.frame = NSRect(x: 104, y: 3, width: 42, height: 22)
+        cloudLabel.frame = NSRect(x: 154, y: 4, width: 60, height: 18)
+        addSubview(localLabel)
+        addSubview(track)
+        addSubview(cloudLabel)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // NSMenu's tracking run loop doesn't reliably forward clicks to embedded
+    // controls, so route ALL clicks on the row to `mouseDown`. Clicking
+    // anywhere on the row flips the toggle.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(convert(point, from: superview)) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isInteractive else { return }
+        let newCloud = !track.isCloud
+        track.isCloud = newCloud
+        onChange?(newCloud)
+    }
+
+    /// Reflect the current mode + whether switching is allowed.
+    func configure(isCloud: Bool, enabled: Bool, tooltip: String?) {
+        isInteractive = enabled
+        track.isCloud = isCloud
+        track.dimmed = !enabled
+        localLabel.textColor = isCloud ? .secondaryLabelColor : .labelColor
+        cloudLabel.textColor = isCloud ? .labelColor : .secondaryLabelColor
+        toolTip = tooltip
+        localLabel.toolTip = tooltip
+        cloudLabel.toolTip = tooltip
+    }
+}
+
 @main
 struct SprichApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -23,6 +110,8 @@ struct SprichApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var statusItem: NSStatusItem!
+    /// The Local⇄Cloud switch hosted in the menubar dropdown (tag-101 row).
+    private var processingToggleView: ProcessingToggleView?
     /// Exposed so OnboardingView's "Try it now" step can install a
     /// transient `interceptOutput` closure that routes the test
     /// transcription back into the onboarding window.
@@ -519,23 +608,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         header.tag = 100
         menu.addItem(header)
 
-        // Sprint 2F P2-LLM-14 — network-status info row (tag 101).
-        // Always-visible truthful indicator of what THIS Mac's next
-        // dictation will / won't send to the network. Live-updates via
-        // the Combine sink set up below.
-        let networkRow = NSMenuItem(title: "🟢 Offline", action: nil, keyEquivalent: "")
-        networkRow.tag = 101
-        networkRow.toolTip = NetworkStatusIndicator.shared.route.tooltip
-        menu.addItem(networkRow)
+        // Quick toggle (tag 101) — v1.0.13. A real on/off switch that flips
+        // BOTH stt + llm between on-device ("On this Mac") and Cloud in one
+        // move. The switch is greyed (but still visible) unless BOTH sides are
+        // fully configured — local models downloaded AND a cloud API key
+        // present. State is kept current by `updateProcessingToggleRow`
+        // (route sink below + `refreshDynamicMenuItems`), so a freshly-
+        // downloaded model or freshly-entered key enables it without relaunch.
+        let toggleView = ProcessingToggleView()
+        toggleView.onChange = { [weak self] isCloud in
+            self?.setProcessing(toCloud: isCloud)
+        }
+        processingToggleView = toggleView
+        let toggleRow = NSMenuItem()
+        toggleRow.tag = 101
+        toggleRow.view = toggleView
+        menu.addItem(toggleRow)
         menu.addItem(NSMenuItem.separator())
+        updateProcessingToggleRow()
 
-        // Live-refresh menubar network row when settings change provider.
+        // Live-refresh the toggle when the selected providers change.
         NetworkStatusIndicator.shared.$route
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] route in
-                guard let item = self?.statusItem.menu?.item(withTag: 101) else { return }
-                item.title = "\(route.glyph) \(route.shortLabel)"
-                item.toolTip = route.tooltip
+            .sink { [weak self] _ in
+                self?.updateProcessingToggleRow()
             }
             .store(in: &appState.cancellables)
 
@@ -1066,6 +1162,11 @@ extension AppDelegate: NSMenuDelegate {
             axSep.isHidden = axGranted
         }
 
+        // Quick toggle (tag 101) — readiness can change while the menu is
+        // closed (a model finishes downloading, an API key is entered), so
+        // re-evaluate enabled-state + title on every open.
+        updateProcessingToggleRow()
+
         // Account row — drives one of 5 entitlement states.
         if let acct = menu.item(withTag: 300), let signOut = menu.item(withTag: 301) {
             applyAccountRowState(account: acct, signOut: signOut)
@@ -1101,6 +1202,82 @@ extension AppDelegate: NSMenuDelegate {
                 let code = langItem.representedObject as? String
                 langItem.state = (code == current) ? .on : .off
             }
+        }
+    }
+
+    // MARK: - Quick toggle (Local ⇄ Cloud)
+
+    /// True when on-device dictation is fully usable: both the selected local
+    /// Whisper model and the resolved local LLM model are downloaded.
+    @MainActor
+    private var isLocalFullyReady: Bool {
+        let sttReady = WhisperModelManager.shared.existingFolder(for: appState.settings.localWhisperModel) != nil
+        let llmReady = LLMModelManager.shared.existingFile(for: LocalLLMModelSpec.resolved(from: appState.settings)) != nil
+        return sttReady && llmReady
+    }
+
+    /// First cloud STT provider that has an API key, in priority order.
+    private func firstCloudSTTWithKey() -> STTProviderType? {
+        [.groq, .openai, .deepgram].first { KeychainManager.retrieve(key: $0.keychainKey) != nil }
+    }
+
+    /// First cloud LLM provider that has an API key, in priority order
+    /// (one Groq key satisfies both STT and LLM — same keychain entry).
+    private func firstCloudLLMWithKey() -> LLMProviderType? {
+        [.groq, .claude, .google, .openai].first { KeychainManager.retrieve(key: $0.keychainKey) != nil }
+    }
+
+    /// True when cloud dictation is fully usable: a cloud STT key AND a cloud
+    /// LLM key are present.
+    private var isCloudFullyReady: Bool {
+        firstCloudSTTWithKey() != nil && firstCloudLLMWithKey() != nil
+    }
+
+    /// Reconfigure the toggle switch from the current providers + readiness.
+    /// The switch shows ON = Cloud (both legs cloud), OFF = On this Mac, and
+    /// is greyed unless BOTH local and cloud are fully configured.
+    @MainActor
+    fileprivate func updateProcessingToggleRow() {
+        guard let view = processingToggleView else { return }
+        let bothCloud = !appState.settings.sttProvider.isLocal && !appState.settings.llmProvider.isLocal
+        let canToggle = isLocalFullyReady && isCloudFullyReady
+        let tip: String
+        if canToggle {
+            tip = "Flip between running on your Mac and in the cloud — switches both transcription and cleanup."
+        } else if !isCloudFullyReady {
+            tip = "Add a cloud API key (Settings → AI Models) to switch to the cloud from here."
+        } else {
+            tip = "Download the on-device models (Settings → AI Models) to switch to your Mac from here."
+        }
+        view.configure(isCloud: bothCloud, enabled: canToggle, tooltip: tip)
+    }
+
+    /// Flip BOTH stt + llm between on-device and cloud. Reached only when the
+    /// switch is enabled. `saveSettings()` refreshes `NetworkStatusIndicator`,
+    /// whose route sink then reconfigures the switch.
+    @MainActor
+    private func setProcessing(toCloud: Bool) {
+        guard isLocalFullyReady, isCloudFullyReady else {
+            updateProcessingToggleRow()  // revert the switch if somehow flipped
+            return
+        }
+        if toCloud {
+            if let stt = firstCloudSTTWithKey() { appState.settings.sttProvider = stt }
+            if let llm = firstCloudLLMWithKey() { appState.settings.llmProvider = llm }
+        } else {
+            appState.settings.sttProvider = .local
+            appState.settings.llmProvider = .local
+        }
+        appState.saveSettings()
+
+        // Switching to on-device must warm BOTH models, or the next dictation
+        // hits "Sprich is still warming up". The Settings provider picker does
+        // this in `selectLocalSTT`; the menubar toggle must too. Idempotent —
+        // the `…IfReady` calls no-op when already warm or not downloaded.
+        if !toCloud {
+            WhisperModelManager.shared.refreshState(for: appState.settings.localWhisperModel)
+            TranscriptionService.prewarmLocalWhisperIfReady(model: appState.settings.localWhisperModel)
+            LocalLLMService.prewarmIfReady(settings: appState.settings)
         }
     }
 

@@ -69,9 +69,18 @@ enum FormalOutputGuard {
     struct Policy {
         /// Allowed delta between Pass-1 and output sentence counts.
         let sentenceCountTolerance: Int
-        /// Output character count must not exceed this multiple of
-        /// Pass-1's character count.
+        /// Output character count must not exceed
+        /// `pass1Chars * maximumLengthRatio + scaffoldAllowanceChars`.
         let maximumLengthRatio: Double
+        /// Fixed extra characters allowed on top of the ratio — covers
+        /// FIXED scaffolding the destination adds regardless of input length
+        /// (an email greeting + sign-off + paragraph breaks ≈ 30-60 chars).
+        /// On a short dictation this fixed cost blows past a pure ratio: a
+        /// real 71-char "Hi Maria…" email polished to 181 chars is 2.55× —
+        /// it would trip a 2.5× cap even though it's correct. The allowance
+        /// fixes that without loosening the ratio for long inputs (where the
+        /// "answered the question → 5× list" hallucination still trips).
+        var scaffoldAllowanceChars: Int = 0
     }
 
     /// Default policy — applies to surfaces that do not restructure
@@ -91,7 +100,8 @@ enum FormalOutputGuard {
     /// hallucination — a question becomes a 5×-length numbered list.
     static let emailPolicy = Policy(
         sentenceCountTolerance: 4,
-        maximumLengthRatio: 2.5
+        maximumLengthRatio: 2.5,
+        scaffoldAllowanceChars: 90   // greeting + sign-off + paragraph breaks
     )
 
     /// Task-manager policy (ClickUp / Linear / Notion / Jira / Asana
@@ -106,9 +116,15 @@ enum FormalOutputGuard {
     /// Length cap stays moderate (1.8×) — task descriptions are
     /// usually shorter or close to Pass-1; large expansion is a red
     /// flag.
+    // Structured ticket: a bold title line + bulleted acceptance criteria.
+    // Title + up to several bullets each read as a sentence (±6); markdown
+    // markers (** **, "- ") and the new title line add fixed chars on top of
+    // a moderate 2.0× expansion. A "wrote the work instead of the ticket"
+    // failure still produces prose far past this and trips.
     static let taskManagerPolicy = Policy(
-        sentenceCountTolerance: 5,
-        maximumLengthRatio: 1.8
+        sentenceCountTolerance: 6,
+        maximumLengthRatio: 2.0,
+        scaffoldAllowanceChars: 90   // title line + bullet/bold markdown markers
     )
 
     /// AI-chat policy (ChatGPT / Claude / Gemini / Copilot / Perplexity
@@ -122,7 +138,8 @@ enum FormalOutputGuard {
     /// language drift) carry the protection.
     static let aiChatPolicy = Policy(
         sentenceCountTolerance: 5,
-        maximumLengthRatio: 1.8
+        maximumLengthRatio: 1.8,
+        scaffoldAllowanceChars: 40   // bulleted constraints
     )
 
     /// Docs policy. Output preserves prose structure with paragraph
@@ -210,6 +227,14 @@ enum FormalOutputGuard {
     /// hard-coding any list.
     static let contentWordMinLength: Int = 4
 
+    /// Custom-mode runaway-generation ceiling (security item H1). Far looser
+    /// than the Formal bands because Custom transforms legitimately expand
+    /// (e.g. "turn these notes into bullet points"); 4× only trips on the
+    /// essay-from-one-sentence signature of a *fulfilled* injected
+    /// instruction. The primary anti-injection defense is the immutable
+    /// Custom core; this is a backstop. See `enforceCustom`.
+    static let customMaximumLengthRatio: Double = 4.0
+
     /// Enforce the contract on `rawLLMOutput`.
     ///
     /// `language` is the ISO 639-1 source language code (or nil for
@@ -235,37 +260,41 @@ enum FormalOutputGuard {
             return Result(text: pass1Text, usedFallback: true, fallbackReason: "empty output after cleanup")
         }
 
-        // Length-ratio checks. Run BEFORE the sentence-count check so
-        // the more specific "too short / too long" diagnostic surfaces
-        // when both would fire. Skip when Pass-1 is short — short
-        // dictations have noisy ratios and the sentence-count check
-        // is sufficient there.
         let pass1Chars = pass1Text.count
         let outputChars = cleaned.count
         let maxRatio = policy.maximumLengthRatio
-        if pass1Chars >= Self.minimumLengthCheckChars {
-            let ratio = Double(outputChars) / Double(pass1Chars)
-            if ratio < Self.minimumLengthRatio {
-                return Result(
-                    text: pass1Text,
-                    usedFallback: true,
-                    fallbackReason: String(
-                        format: "output too short (%d chars vs pass1=%d, ratio=%.2f)",
-                        outputChars, pass1Chars, ratio
-                    )
+        let ratio = Double(outputChars) / Double(max(pass1Chars, 1))
+
+        // Max-length ceiling — runs for EVERY input, including very short
+        // ones (H3). With no real content a model regurgitates its own
+        // system-prompt instructions: an 11-char dictation was observed
+        // producing a 392-char restatement of the task-ticket guidelines.
+        // The cap (ratio*pass1 + fixed scaffold allowance) makes that
+        // impossible — an 11-char task input caps at ~112 chars.
+        let maxChars = Double(pass1Chars) * maxRatio + Double(policy.scaffoldAllowanceChars)
+        if Double(outputChars) > maxChars {
+            let detail = String(
+                format: "output too long (%d chars vs pass1=%d, ratio=%.2f, cap=%.2f+%d",
+                outputChars, pass1Chars, ratio, maxRatio, policy.scaffoldAllowanceChars
+            )
+            return Result(
+                text: pass1Text,
+                usedFallback: true,
+                fallbackReason: "\(detail), surface=\(surface.debugLabel))"
+            )
+        }
+
+        // Min-length floor — gated to longer inputs only; the ratio is noisy
+        // on short dictations ("Thanks." → "Thank you." is a legit 1.4×).
+        if pass1Chars >= Self.minimumLengthCheckChars, ratio < Self.minimumLengthRatio {
+            return Result(
+                text: pass1Text,
+                usedFallback: true,
+                fallbackReason: String(
+                    format: "output too short (%d chars vs pass1=%d, ratio=%.2f)",
+                    outputChars, pass1Chars, ratio
                 )
-            }
-            if ratio > maxRatio {
-                let detail = String(
-                    format: "output too long (%d chars vs pass1=%d, ratio=%.2f, cap=%.2f",
-                    outputChars, pass1Chars, ratio, maxRatio
-                )
-                return Result(
-                    text: pass1Text,
-                    usedFallback: true,
-                    fallbackReason: "\(detail), surface=\(surface.debugLabel))"
-                )
-            }
+            )
         }
 
         // Language-drift check. Catches the case where a small model
@@ -313,8 +342,16 @@ enum FormalOutputGuard {
             }
         }
 
-        let pass1Count = countSentences(pass1Text, language: language)
-        let outputCount = countSentences(cleaned, language: language)
+        // Scaffold surfaces (email) legitimately ADD a greeting line and a
+        // sign-off line that NLTokenizer counts as sentences — that alone
+        // inflated a real "Hi Maria" email to delta 5 (pass1=2, out=7) and
+        // got the full email rejected. Strip those scaffold lines before
+        // counting so the contract measures the body, not the envelope. The
+        // length-ratio (≤2.5×) and content-recall guards above remain the
+        // over-expansion backstop, so dropping scaffold from the count does
+        // not weaken the "answered the question" catch.
+        let pass1Count = scaffoldAdjustedSentenceCount(pass1Text, surface: surface, language: language)
+        let outputCount = scaffoldAdjustedSentenceCount(cleaned, surface: surface, language: language)
         let delta = abs(outputCount - pass1Count)
         let tolerance = policy.sentenceCountTolerance
         if delta > tolerance {
@@ -325,6 +362,42 @@ enum FormalOutputGuard {
             )
         }
 
+        return Result(text: cleaned, usedFallback: false, fallbackReason: nil)
+    }
+
+    /// Minimal output guard for Custom mode (security item H1). Custom
+    /// legitimately reshapes text per the user's OWN configured instruction,
+    /// so it is NOT held to the Formal sentence-count contract or the strict
+    /// length band. The primary anti-injection defense is the immutable
+    /// Custom core (`SystemPromptCatalog`). This is a backstop: it runs the
+    /// same model-artifact cleanup as before and additionally catches the
+    /// runaway-generation signature of a *fulfilled* injected instruction —
+    /// a short dictation ballooning into a long generated answer. On breach
+    /// it returns the sanitized input, so the user gets their own words and
+    /// never a silently-fulfilled injection. Language is intentionally NOT
+    /// checked: a custom instruction may legitimately translate.
+    static func enforceCustom(inputText: String, rawLLMOutput: String) -> Result {
+        let cleaned = stripWrappingQuotes(stripPreamble(rawLLMOutput))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            return Result(text: inputText, usedFallback: true, fallbackReason: "empty output after cleanup")
+        }
+        // Runaway ceiling runs for EVERY input (incl. very short) — a tiny
+        // dictation must never balloon into a long generation (H3). Fixed
+        // floor (+60) keeps legit short transforms ("OK" → "Okay.") passing.
+        let inputChars = inputText.count
+        let ratio = Double(cleaned.count) / Double(max(inputChars, 1))
+        let maxChars = Double(inputChars) * Self.customMaximumLengthRatio + 60
+        if Double(cleaned.count) > maxChars {
+            return Result(
+                text: inputText,
+                usedFallback: true,
+                fallbackReason: String(
+                    format: "custom output too long (%d chars vs input=%d, ratio=%.2f, cap=%.2f+60)",
+                    cleaned.count, inputChars, ratio, Self.customMaximumLengthRatio
+                )
+            )
+        }
         return Result(text: cleaned, usedFallback: false, fallbackReason: nil)
     }
 
@@ -392,6 +465,36 @@ enum FormalOutputGuard {
             return true
         }
         return count
+    }
+
+    /// Sentence count with email-scaffold lines excluded. For `.email` the
+    /// model is asked to add a greeting line and a sign-off line; those count
+    /// as sentences to `NLTokenizer` and inflate the delta even when the body
+    /// matches Pass-1 one-for-one. Drop a leading greeting and a trailing
+    /// sign-off before counting so the sentence-count contract measures the
+    /// body. No-op for non-scaffold surfaces.
+    static func scaffoldAdjustedSentenceCount(
+        _ text: String, surface: Surface, language: String?
+    ) -> Int {
+        guard surface == .email else {
+            return countSentences(text, language: language)
+        }
+        var lines = text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if let first = lines.first, isEmailScaffoldLine(first) { lines.removeFirst() }
+        if let last = lines.last, isEmailScaffoldLine(last) { lines.removeLast() }
+        return countSentences(lines.joined(separator: " "), language: language)
+    }
+
+    /// Heuristic for an email greeting/sign-off line: a short line ending in
+    /// a comma ("Hi Maria," / "Best," / "Thanks,"). Language-agnostic — it
+    /// keys on the scaffold convention the email hint prescribes, not a
+    /// per-language word list. Conservative length cap so a real one-line
+    /// body sentence that happens to end in a comma is not mistaken for it.
+    private static func isEmailScaffoldLine(_ line: String) -> Bool {
+        line.count <= 40 && line.hasSuffix(",")
     }
 
     private static func nlLanguage(for code: String) -> NLLanguage? {

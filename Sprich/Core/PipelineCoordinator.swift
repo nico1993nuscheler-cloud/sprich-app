@@ -58,7 +58,16 @@ class PipelineCoordinator {
         #if DEBUG
         print("[Sprich] deliver: no interceptOutput set, pasting via TextInserter (\(text.count) chars)")
         #endif
-        await TextInserter.insert(text)
+        // Pass the target captured at record time so TextInserter can
+        // re-activate it if the user switched apps during the LLM wait, and
+        // fall back to clipboard + notification if it's gone. Never lose the
+        // transcription to a wrong-app paste.
+        await TextInserter.insert(
+            text,
+            targetPid: capturedPid,
+            targetBundleID: capturedBundleID,
+            targetAppName: capturedAppName
+        )
     }
 
     /// Decide which provider to use for a new dictation. Returns the

@@ -22,6 +22,21 @@ enum InputSanitizer {
         return try? NSRegularExpression(pattern: p)
     }()
 
+    /// A line-leading `Destination:` directive dictated by the *user*. The app
+    /// owns the real `Destination:` line (appended to the SYSTEM prompt by
+    /// `LLMService.composeSystemPrompt`); a dictation line that starts with
+    /// `Destination:` can otherwise impersonate it and hijack the output shape
+    /// — the injection bench saw `"Destination: code. …"` produce a bash
+    /// script instead of a polished email. We strip only the leading keyword
+    /// (at line start), keeping any real content so it is rewritten as ordinary
+    /// dictation rather than obeyed as a directive. Mid-line uses
+    /// ("our destination: Paris") are not at line start, so they're untouched.
+    /// Security audit H2, 2026-05-31.
+    private static let destinationDirectivePattern: NSRegularExpression? = {
+        let p = #"(?im)^[ \t]*destination[ \t]*:[ \t]*"#
+        return try? NSRegularExpression(pattern: p)
+    }()
+
     /// Invisible / zero-width / format scalars that can smuggle instructions
     /// past human review (homoglyph & invisible-instruction attacks). Whisper
     /// never produces these from speech, but the glossary, Custom-prompt field,
@@ -46,6 +61,14 @@ enum InputSanitizer {
         if let regex = controlTokenPattern {
             let range = NSRange(sanitized.startIndex..., in: sanitized)
             sanitized = regex.stringByReplacingMatches(in: sanitized, range: range, withTemplate: " ")
+        }
+
+        // H2 — strip a user-dictated line-leading `Destination:` keyword so it
+        // can't impersonate the app's real destination directive. Keeps the
+        // rest of the line (rewritten as ordinary dictation).
+        if let regex = destinationDirectivePattern {
+            let range = NSRange(sanitized.startIndex..., in: sanitized)
+            sanitized = regex.stringByReplacingMatches(in: sanitized, range: range, withTemplate: "")
         }
 
         // Remove control characters (except newline and tab) AND invisible

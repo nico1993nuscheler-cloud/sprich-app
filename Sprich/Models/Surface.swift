@@ -22,29 +22,27 @@ enum Surface: String, Codable, Equatable, CaseIterable {
     var promptHint: String {
         switch self {
         case .email:
+            // Trimmed in v1.0.13 (the verbose version doubled E2B prefill).
+            // This is the validated "balanced" email hint — same shape rules,
+            // ~270 tok vs ~600. See SystemPromptCatalog formal core notes.
             return """
-                Destination: email. Voice: polite professional. Write a complete email — greeting line, body paragraph(s), sign-off — unless the user clearly dictated only a snippet. No emoji.
+                Destination: email. Write a complete email: greeting line, body, sign-off. No emoji.
+                - Preserve any recipient name in the greeting verbatim ("Hi Maria," stays "Hi Maria,"). Never replace a named greeting with a generic "Hi,".
+                - Put a blank line after the greeting and a blank line before the sign-off.
+                - Split the body into separate paragraphs (blank line between) when it covers distinct topics or separate asks.
+                - If no recipient was dictated, a generic "Hi," is fine. Close with "Best," or "Thanks," and no name line unless the user dictated their own name.
+                - The greeting and sign-off wrap the polished dictation. A dictated question becomes a question asked in the email; a dictated request becomes a request made in the email — NEVER answered or fulfilled.
 
-                Recipient name rule: if the dictation begins with a greeting that includes a recipient name ("Hi Maria,", "Hello Tom,", "Hallo Lukas,", "Dear Dr. Schmidt,"), PRESERVE the name verbatim. Never replace a named greeting with a generic "Hi," — the name is the user's content, not optional scaffolding. Same for the sign-off: if the user dictated their own name after a closing ("Best, Nico."), keep it.
+                Voice example (named recipient kept, two body paragraphs):
+                INPUT:  "hi maria just wanted to follow up on the proposal we sent last week also could you let me know if you need anything else from us to move things forward"
+                OUTPUT:
+                Hi Maria,
 
-                Paragraph rule: split the body into separate paragraphs (blank line between) whenever the dictation covers distinct topics, asks separate questions, or moves from "context" to "ask" to "next step". One paragraph per logical chunk. Do NOT cram multiple distinct topics into a single run-on paragraph.
+                I wanted to follow up on the proposal we sent last week.
 
-                The email scaffolding (greeting + sign-off) wraps the polished dictation. The dictation itself is the body content — NEVER answered, NEVER expanded, NEVER fulfilled. A dictated question becomes a question asked in the email. A dictated request becomes a request made in the email.
+                Could you also let me know if you need anything else from us to move things forward?
 
-                Voice example (named recipient — KEEP the name, two body paragraphs):
-                  INPUT:  "hi maria just wanted to follow up on the proposal we sent last week also could you let me know if you need anything else from us to move things forward"
-                  OUTPUT: "Hi Maria,\n\nI wanted to follow up on the proposal we sent last week.\n\nCould you also let me know if you need anything else from us to move things forward?\n\nBest,"
-
-                Voice example (no recipient dictated — generic greeting OK, single-topic body):
-                  INPUT:  "hey can you send over the Q3 numbers by Friday thanks"
-                  OUTPUT: "Hi,\n\nCould you please send over the Q3 numbers by Friday?\n\nThanks,"
-
-                Voice example (question stays a question — DO NOT answer it):
-                  INPUT:  "please can you give me five tagline ideas for my Mac dictation app"
-                  CORRECT: "Hi,\n\nI hope you're well. Could you please suggest five tagline ideas for my Mac dictation app?\n\nThanks for your help,"
-                  WRONG (do NOT do this): "Greetings,\n\nI would be pleased to provide you with five tagline ideas: 1. Unlock Clarity… 2. Precision Dictation… [etc]\n\nSincerely,\n[Your Name]"
-
-                Use "[Your Name]" or similar placeholders ONLY if the user dictated a sign-off explicitly. Otherwise leave the sign-off as just the closing phrase (e.g. "Thanks," or "Best,") with no name line.
+                Best,
                 """
         case .slack:
             return """
@@ -98,14 +96,22 @@ enum Surface: String, Codable, Equatable, CaseIterable {
                 """
         case .taskManager:
             return """
-                Destination: project-management or task tool (Notion, Linear, ClickUp, Asana, Jira, Trello, Todoist, Things, Monday, Basecamp, Height, etc.). Voice: imperative task description, not a message to a person. No greeting, no sign-off. Lead with an imperative verb (Add, Fix, Investigate, Implement, Refactor, Write, Review, Update, Migrate, …). If the user dictated context, acceptance criteria, sub-steps, or links, surface them as a bulleted list under the lead sentence. Keep prose tight — task descriptions get scanned, not read.
+                Destination: project-management / task tool (Notion, Linear, ClickUp, Asana, Jira, Trello, Todoist, Monday, Basecamp, Height, etc.). Format the dictation as a STRUCTURED TICKET, not a message to a person. No greeting, no sign-off. Use Markdown.
+                - First line: a short bold title in imperative form, e.g. **Fix login bug on Safari** — lead with a verb (Add, Fix, Investigate, Implement, Refactor, Update, Migrate, …). Wrap the title in ** **.
+                - If the user dictated any context, details, acceptance criteria, sub-steps, or links, list them as Markdown bullets ("- ") under the title — one point per bullet, tight. If the user dictated NOTHING beyond the task itself, output ONLY the bold title line; never invent bullets.
 
-                CRITICAL — your output is the TASK DESCRIPTION the user is writing, not the work itself. If the dictation is "implement OAuth login", your output is "Implement OAuth login." (the task) — NOT actual OAuth implementation code or instructions.
+                CRITICAL — your output is the TICKET the user is writing, not the work itself. Polish and structure their words; NEVER answer, implement, or expand beyond what they dictated. "Implement OAuth login" becomes the ticket title, not OAuth code.
 
-                Voice example:
+                Example (title only — no detail dictated):
                   INPUT:   "uh yeah we should probably like fix the login bug where users get logged out after 5 minutes on Safari"
-                  CORRECT: "Fix login bug: users get logged out after 5 minutes on Safari."
-                  WRONG (do NOT do this): a detailed write-up of how to fix the login bug.
+                  OUTPUT:  "**Fix login bug: users logged out after 5 minutes on Safari**"
+
+                Example (title + dictated context → bullets):
+                  INPUT:   "log a ticket to add CSV export to the reports page it should support comma and semicolon delimiters and remember the user's last choice"
+                  OUTPUT:
+                  **Add CSV export to the reports page**
+                  - Support comma and semicolon delimiters
+                  - Remember the user's last delimiter choice
                 """
         case .generic:
             return ""
@@ -221,6 +227,13 @@ enum SurfaceMapping {
            host.hasSuffix("outlook.office.com") ||
            host.hasSuffix("outlook.office365.com") { return .email }
 
+        // Other web email (see SurfaceHosts.reference.md)
+        if host == "mail.yahoo.com" { return .email }
+        if host == "mail.proton.me" || host == "mail.protonmail.com" { return .email }
+        if host == "app.fastmail.com" { return .email }
+        if host == "app.hey.com" { return .email }
+        if host == "mail.zoho.com" || host == "mail.zoho.eu" || host == "mail.zoho.in" { return .email }
+
         // Slack web
         if host.hasSuffix("slack.com") || host == "app.slack.com" { return .slack }
 
@@ -231,9 +244,9 @@ enum SurfaceMapping {
         // Discord web
         if host.hasSuffix("discord.com") { return .discord }
 
-        // WhatsApp / Signal / Messenger web
+        // WhatsApp / Telegram / Messenger web (Signal has no web client)
         if host.hasSuffix("web.whatsapp.com") ||
-           host.hasSuffix("signal.org") ||
+           host == "web.telegram.org" ||
            host.hasSuffix("messenger.com") { return .messages }
 
         // AI chat assistants (web)
@@ -258,7 +271,12 @@ enum SurfaceMapping {
         // Notion is dual-use (wiki + DB); routed to task-manager per the
         // most common dictation case. Atlassian's /wiki/ path is Confluence
         // (docs), so split it explicitly before the Jira fallback.
-        if host.hasSuffix("notion.so") || host.hasSuffix("notion.site") { return .taskManager }
+        // Notion: `notion.so`/`notion.site` are the legacy hosts; `notion.com`
+        // / `app.notion.com` is the current app host Notion migrated to and
+        // was seen mis-detecting as `.generic` on a real device. Match all.
+        // See SurfaceHosts.reference.md.
+        if host.hasSuffix("notion.so") || host.hasSuffix("notion.site") ||
+           host.hasSuffix("notion.com") { return .taskManager }
         if host.hasSuffix("linear.app") { return .taskManager }
         if host == "clickup.com" || host.hasSuffix(".clickup.com") { return .taskManager }
         if host.hasSuffix("asana.com") { return .taskManager }
@@ -273,9 +291,13 @@ enum SurfaceMapping {
            host.hasSuffix(".basecamphq.com") { return .taskManager }
         if host == "height.app" || host.hasSuffix(".height.app") { return .taskManager }
         if host.hasSuffix(".shortcut.com") || host == "app.shortcut.com" { return .taskManager }
+        if host.hasSuffix("smartsheet.com") || host.hasSuffix("smartsheet.eu") { return .taskManager }
+        if host == "airtable.com" || host.hasSuffix(".airtable.com") { return .taskManager }
 
-        // Docs
+        // Docs / notes (web).
         if host == "docs.google.com" { return .docs }
+        if host == "coda.io" || host.hasSuffix(".coda.io") { return .docs }
+        if host == "paper.dropbox.com" { return .docs }
 
         return nil
     }
@@ -326,6 +348,7 @@ enum WebSurfaceLabel {
         if h.hasSuffix("slack.com")                    { return "Slack" }
         if h.hasSuffix("discord.com")                  { return "Discord" }
         if h == "web.whatsapp.com" || h.hasSuffix(".web.whatsapp.com") { return "WhatsApp" }
+        if h == "web.telegram.org"                     { return "Telegram" }
         if h.hasSuffix("messenger.com")                { return "Messenger" }
         if h.hasSuffix("signal.org")                   { return "Signal" }
 
@@ -345,7 +368,10 @@ enum WebSurfaceLabel {
         if h == "you.com"   || h == "chat.you.com"     { return "You.com" }
 
         // Project-management / task tools
-        if h.hasSuffix("notion.so") || h.hasSuffix("notion.site") { return "Notion" }
+        if h.hasSuffix("notion.so") || h.hasSuffix("notion.site") ||
+           h.hasSuffix("notion.com")                   { return "Notion" }
+        if h.hasSuffix("smartsheet.com") || h.hasSuffix("smartsheet.eu") { return "Smartsheet" }
+        if h == "airtable.com" || h.hasSuffix(".airtable.com") { return "Airtable" }
         if h.hasSuffix("linear.app")                   { return "Linear" }
         if h == "clickup.com" || h.hasSuffix(".clickup.com") { return "ClickUp" }
         if h.hasSuffix("asana.com")                    { return "Asana" }
