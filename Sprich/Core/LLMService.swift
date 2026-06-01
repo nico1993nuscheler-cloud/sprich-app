@@ -24,19 +24,34 @@ class LLMService {
         return seconds
     }
 
-    /// Append the surface's prompt hint to the base system prompt when
-    /// surface adaptation applies. Pure/static so it can be unit tested
-    /// without touching any provider or settings side effects.
+    /// Build the final system prompt for an LLM mode:
+    ///   immutable core  (+ optional user style layer)  (+ surface hint)
+    ///
+    /// `core` is the per-language immutable safety prompt from
+    /// `SystemPromptCatalog` — the "you are a rewriter, not an assistant"
+    /// framing plus the anti-injection rules. It ALWAYS leads, so the user's
+    /// editable layer (or an injected instruction) can never strip it.
+    /// `editableLayer` is the user's optional Formal/Custom style addition
+    /// (empty by default). The surface hint (`Destination: …`) is appended
+    /// for Formal only, when `adaptToSurface` is on. Pure/static so it can
+    /// be unit tested without touching any provider or settings side effects.
     static func composeSystemPrompt(
-        base: String,
+        core: String,
         mode: TranscriptionMode,
+        editableLayer: String,
         surface: Surface,
         adaptToSurface: Bool
     ) -> String {
-        guard adaptToSurface, mode == .formal else { return base }
-        let hint = surface.promptHint
-        guard !hint.isEmpty else { return base }
-        return base + "\n\n" + hint
+        // Literal never reaches the LLM; return the core for completeness.
+        guard mode == .formal || mode == .custom else { return core }
+        var prompt = core
+        let layer = editableLayer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !layer.isEmpty { prompt += "\n\n" + layer }
+        if mode == .formal, adaptToSurface {
+            let hint = surface.promptHint
+            if !hint.isEmpty { prompt += "\n\n" + hint }
+        }
+        return prompt
     }
 
     private static func throwIfRateLimited(
@@ -76,9 +91,30 @@ class LLMService {
             throw SprichError.emptyTranscription
         }
 
+        // Short-input bypass (mirrors LocalLLMService). A tiny Formal
+        // dictation — "Thanks.", or an accidental 2-second hotkey press that
+        // yields ~10 chars — makes the model hallucinate the in-prompt
+        // instructions/examples back as output (observed: an 11-char input
+        // producing a 392-char regurgitation of the task-ticket guidelines).
+        // Pass-1 already handled capitalization + punctuation at this length,
+        // so skip the LLM and return it. Cloud path only; `.local` delegates
+        // to LocalLLMService which applies the same bypass.
+        if mode == .formal, settings.llmProvider != .local,
+           sanitizedText.count < LocalLLMService.shortInputBypassChars {
+            #if DEBUG
+            print("[Sprich] Formal short-input bypass (cloud): \(sanitizedText.count) chars < \(LocalLLMService.shortInputBypassChars)")
+            #endif
+            return sanitizedText
+        }
+
+        // Immutable per-language core (anti-injection spine) from the same
+        // catalog the local path uses — cloud + local now share it, so the
+        // safety guarantee is structural across providers.
+        let core = SystemPromptCatalog.prompt(for: mode, language: settings.preferredLanguage)
         let systemPrompt = Self.composeSystemPrompt(
-            base: settings.promptForMode(mode),
+            core: core,
             mode: mode,
+            editableLayer: settings.editableLayer(for: mode),
             surface: surface,
             adaptToSurface: settings.adaptToSurface
         )
@@ -159,10 +195,18 @@ class LLMService {
             // only half the shape. No-op on non-email surfaces.
             return TextPostProcessor.normalizeShape(result.text, surface: effectiveSurface)
         } else {
-            let cleaned = FormalOutputGuard.stripWrappingQuotes(
-                FormalOutputGuard.stripPreamble(rawLLMOutput)
+            // Custom mode (H1): immutable core + minimal runaway-generation
+            // backstop. Not held to the Formal contract.
+            let result = FormalOutputGuard.enforceCustom(
+                inputText: sanitizedText,
+                rawLLMOutput: rawLLMOutput
             )
-            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            #if DEBUG
+            if result.usedFallback {
+                print("[Sprich] Custom guard fallback (cloud): \(result.fallbackReason ?? "?")")
+            }
+            #endif
+            return result.text
         }
     }
 

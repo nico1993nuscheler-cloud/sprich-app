@@ -281,19 +281,20 @@ actor LocalLLMService {
             return sanitizedText
         }
 
-        // Compose the base system prompt for the active mode + language
-        // via the same catalog cloud uses. This is the "prompt parity"
-        // hook from `proposed-prompt-change.md`.
-        let basePrompt = SystemPromptCatalog.prompt(
+        // Immutable per-language core via the same catalog cloud uses
+        // (prompt parity). The optional user style layer + surface hint are
+        // layered on by the shared composer.
+        let core = SystemPromptCatalog.prompt(
             for: mode,
             language: settings.preferredLanguage
         )
-        // Reuse the existing surface-adaptation helper — Formal-mode
-        // outputs adapt to email / slack / docs / etc. on the 1B model
-        // via the same `Destination: …` if/else rule the cloud path uses.
+        // Reuse the shared composer — Formal-mode outputs adapt to email /
+        // slack / docs / etc. via the same `Destination: …` rule the cloud
+        // path uses; Custom gets its immutable core + the user's instruction.
         let systemPrompt = LLMService.composeSystemPrompt(
-            base: basePrompt,
+            core: core,
             mode: mode,
+            editableLayer: settings.editableLayer(for: mode),
             surface: surface,
             adaptToSurface: settings.adaptToSurface
         )
@@ -420,8 +421,8 @@ actor LocalLLMService {
         // Formal mode: enforce the two-pass contract (sentence count
         // within ±1 of Pass 1, non-empty after artifact cleanup). On
         // breach the guard returns `sanitizedText` (== Pass 1) silently.
-        // Custom mode is user-driven — no contract to enforce, just run
-        // the same artifact cleanup as before.
+        // Custom mode is user-driven — no sentence contract, but a minimal
+        // runaway-generation backstop (H1) on top of artifact cleanup.
         if mode == .formal {
             let effectiveSurface: Surface = settings.adaptToSurface ? surface : .generic
             let result = FormalOutputGuard.enforce(
@@ -441,10 +442,18 @@ actor LocalLLMService {
             // non-email surfaces.
             return TextPostProcessor.normalizeShape(result.text, surface: effectiveSurface)
         } else {
-            let cleaned = FormalOutputGuard.stripWrappingQuotes(
-                FormalOutputGuard.stripPreamble(raw)
+            // Custom mode (H1): immutable core + minimal runaway-generation
+            // backstop. Not held to the Formal contract.
+            let result = FormalOutputGuard.enforceCustom(
+                inputText: sanitizedText,
+                rawLLMOutput: raw
             )
-            return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+            #if DEBUG
+            if result.usedFallback {
+                print("[Sprich] Custom guard fallback (local): \(result.fallbackReason ?? "?")")
+            }
+            #endif
+            return result.text
         }
     }
 

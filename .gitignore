@@ -31,3 +31,7 @@ dist/
 
 # Standalone landing-page checkout (lives in the sprich-landing repo)
 landing/
+
+# v1.0.13 isolated build dirs
+.build-v1013/
+.release-dd/

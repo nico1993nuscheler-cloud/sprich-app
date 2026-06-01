@@ -303,7 +303,7 @@ private struct AccountSection: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Delete account")
                             .font(.caption).foregroundColor(.secondary)
-                        Text("Email support@sprichapp.com to delete your account and associated trial/license records.")
+                        Text("To delete your account and trial/license records, email:")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -518,47 +518,20 @@ private struct AboutPrivacySection: View {
                                   ? Color.green.opacity(0.10)
                                   : Color.orange.opacity(0.10))
                     )
-
-                    Text("Sprich shows this indicator live on the recording overlay too — green confirms the dictation ran without any network call.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 SettingsCard {
-                    Text("Network call inventory")
+                    Text("Models")
                         .font(.caption).foregroundColor(.secondary)
-                    Text("Every outbound call Sprich makes is documented in plain language. Available on request — we'll publish it on the website before public launch. If you find a call we haven't disclosed, email us and we'll treat it as a bug.")
+                    Text("On your Mac: Whisper (via WhisperKit) for transcription, Gemma by Google (via llama.cpp) for cleanup. Cloud uses your chosen provider with your own API key.")
                         .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // Mandatory Gemma attribution (verbatim — do not edit).
+                    Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-
-                    HStack {
-                        Link("Email support@sprichapp.com",
-                             destination: URL(string: "mailto:support@sprichapp.com?subject=Network%20call%20inventory%20request")!)
-                            .font(.caption)
-                        Spacer()
-                    }
-                    .padding(.top, 2)
-                }
-
-                SettingsCard {
-                    Text("AI model attributions")
-                        .font(.caption).foregroundColor(.secondary)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Speech-to-text runs on-device with Whisper via WhisperKit when you pick \"On this Mac\". Cloud STT routes to your chosen provider (Groq, OpenAI, or Deepgram) using your own API key.")
-                            .font(.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("AI cleanup runs on-device with Gemma 3 by Google via llama.cpp when you pick \"On this Mac\". Cloud cleanup routes to your chosen provider (Groq, Claude, Gemini, or OpenAI) using your own API key.")
-                            .font(.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                        // Sprint 2F mandatory Gemma attribution string (verbatim).
-                        Text("Gemma is provided under and subject to the Gemma Terms of Use found at ai.google.dev/gemma/terms.")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 4)
-                    }
+                        .padding(.top, 2)
                 }
 
                 SettingsCard {
@@ -619,78 +592,50 @@ private struct ModesSection: View {
             VStack(alignment: .leading, spacing: 18) {
                 SettingsSectionHeader(icon: "text.quote", title: "Modes")
 
-                Text("Three dictation modes, each on its own hotkey. Pick the right one as you press — no menus, no settings round-trip.")
+                Text("Three modes, each on its own hotkey — pick as you press.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                SettingsCard {
-                    HStack {
-                        Text("Literal").font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        shortcutChip("Fn + Shift")
-                    }
-                    Text("Fast clean-up via Whisper only (no AI rewrite). Punctuation and capitalization polished locally.")
+                modeCard(.literal, hotkey: "Fn + Shift") {
+                    Text("Fast cleanup via Whisper — no AI rewrite.")
                         .font(.caption).foregroundColor(.secondary)
-                    promptEditor($appState.settings.literalPrompt)
-                    HStack {
-                        Button("Reset to default") {
-                            appState.settings.literalPrompt = TranscriptionMode.literal.defaultSystemPrompt
-                            appState.saveSettings()
-                        }
-                        .font(.caption)
-                        Spacer()
-                    }
-                    .onChange(of: appState.settings.literalPrompt) { _, _ in
-                        appState.saveSettings()
-                    }
                 }
 
-                SettingsCard {
-                    HStack {
-                        Text("Formal").font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        shortcutChip("Fn + Control")
-                    }
-                    Text("Full AI rewrite for professional written text.")
+                modeCard(.formal, hotkey: "Fn + Control") {
+                    Text("AI rewrite into polished, professional text, adapted to destination.")
                         .font(.caption).foregroundColor(.secondary)
-                    promptEditor($appState.settings.formalPrompt)
-                    HStack {
-                        Button("Reset to default") {
-                            appState.settings.formalPrompt = TranscriptionMode.formal.defaultSystemPrompt
-                            appState.saveSettings()
-                        }
-                        .font(.caption)
-                        Spacer()
+
+                    styleLayerEditor(
+                        text: $appState.settings.formalPrompt,
+                        placeholder: "**Optional** — your style notes, e.g. \u{201C}Keep it concise\u{201D} or \u{201C}British spelling\u{201D}"
+                    )
+                    .onChange(of: appState.settings.formalPrompt) { _, _ in
+                        appState.saveSettings()
                     }
 
                     Divider().padding(.vertical, 4)
 
-                    Toggle("Adapt tone to destination app", isOn: $appState.settings.adaptToSurface)
+                    Toggle("Match tone to where you paste", isOn: $appState.settings.adaptToSurface)
                         .toggleStyle(.switch)
+                        .tint(.modeFormal)
                         .onChange(of: appState.settings.adaptToSurface) { _, _ in
                             appState.saveSettings()
                         }
-                    Text("Matches the rewrite to where you're pasting — email greeting for Gmail/Mail, terse for Slack/Teams/Messages, clean prose for docs. Reads the active browser tab URL for web apps (one-time Automation permission).")
+                    Text("Email, chat, docs, and more — each adapted to the right tone and format.")
                         .font(.caption).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    .onChange(of: appState.settings.formalPrompt) { _, _ in
-                        appState.saveSettings()
-                    }
                 }
 
-                SettingsCard {
-                    HStack {
-                        Text("Custom").font(.system(size: 13, weight: .semibold))
-                        Spacer()
-                        shortcutChip("Fn + Command")
-                    }
-
+                modeCard(.custom, hotkey: "Fn + Command") {
                     Toggle("Enable custom mode", isOn: $appState.settings.customModeEnabled)
                         .toggleStyle(.switch)
+                        .tint(.modeCustom)
                         .onChange(of: appState.settings.customModeEnabled) { _, _ in
                             appState.saveSettings()
                         }
+                    Text("Fully customize this mode to your specific needs.")
+                        .font(.caption).foregroundColor(.secondary)
 
                     if appState.settings.customModeEnabled {
                         Divider().padding(.vertical, 4)
@@ -719,20 +664,23 @@ private struct ModesSection: View {
 
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("System prompt")
-                                    .font(.caption).foregroundColor(.secondary)
+                                Text("What it should do")
+                                    .font(.caption.weight(.medium))
                                 Spacer()
                                 Text("\(appState.settings.customModePrompt.count) / 400")
                                     .font(.caption2)
                                     .foregroundColor(appState.settings.customModePrompt.count >= 400 ? .orange : .secondary)
                             }
-                            promptEditor(Binding(
-                                get: { appState.settings.customModePrompt },
-                                set: {
-                                    appState.settings.customModePrompt = String($0.prefix(400))
-                                    appState.saveSettings()
-                                }
-                            ))
+                            styleLayerEditor(
+                                text: Binding(
+                                    get: { appState.settings.customModePrompt },
+                                    set: {
+                                        appState.settings.customModePrompt = String($0.prefix(400))
+                                        appState.saveSettings()
+                                    }
+                                ),
+                                placeholder: "e.g. \u{201C}Rewrite as a Slack message\u{201D} or \u{201C}Translate to French\u{201D}"
+                            )
                         }
                     }
                 }
@@ -744,20 +692,75 @@ private struct ModesSection: View {
         }
     }
 
-    private func promptEditor(_ text: Binding<String>) -> some View {
-        TextEditor(text: text)
-            .font(.system(size: 12, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .padding(8)
-            .frame(height: 90)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(NSColor.textBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.gray.opacity(0.25), lineWidth: 0.5)
-            )
+    /// A brand-accented card per mode. The mode's palette color (mint /
+    /// lavender / peach from `ModeTokens`) drives a colored letter badge, a
+    /// thin left stripe, and a subtle tint so Literal / Formal / Custom are
+    /// instantly distinguishable and on-brand.
+    @ViewBuilder
+    private func modeCard<Content: View>(
+        _ mode: TranscriptionMode,
+        hotkey: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(mode.defaultBadgeLetter)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(mode.accentForeground)
+                    .frame(width: 18, height: 18)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(mode.accentColor))
+                Text(mode.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                shortcutChip(hotkey)
+            }
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(mode.accentColor.opacity(0.06))
+        )
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(mode.accentColor)
+                .frame(width: 3)
+                .padding(.vertical, 10)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(mode.accentColor.opacity(0.30), lineWidth: 0.5)
+        )
+    }
+
+    /// Editor for an OPTIONAL user style layer. Shows a placeholder when
+    /// empty so it reads as additive — not the whole prompt.
+    private func styleLayerEditor(text: Binding<String>, placeholder: String) -> some View {
+        ZStack(alignment: .topLeading) {
+            if text.wrappedValue.isEmpty {
+                Text(.init(placeholder))   // LocalizedStringKey → renders **markdown**
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.secondary.opacity(0.6))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 16)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .allowsHitTesting(false)
+            }
+            TextEditor(text: text)
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .frame(height: 80)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(NSColor.textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.gray.opacity(0.25), lineWidth: 0.5)
+        )
     }
 
     private func shortcutChip(_ text: String) -> some View {
