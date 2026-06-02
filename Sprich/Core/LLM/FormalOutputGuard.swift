@@ -87,9 +87,13 @@ enum FormalOutputGuard {
     /// Pass-1 (chat surfaces, docs, generic). ±1 sentence split + ≤1.6×
     /// length covers legitimate polishing while still tripping the
     /// 1.71× cross-language paraphrase observed on Gemma 3 1B.
+    // v1.0.14 — formalizing rambly speech legitimately splits one run-on into
+    // several clean sentences, so ±1 was rejecting good rewrites of exactly the
+    // dictation Formal mode is FOR. ±6 admits restructuring; the over-expansion
+    // backstop is the length ratio (1.8×) + content recall, not sentence count.
     static let defaultPolicy = Policy(
-        sentenceCountTolerance: 1,
-        maximumLengthRatio: 1.6
+        sentenceCountTolerance: 6,
+        maximumLengthRatio: 1.8
     )
 
     /// Email policy. Greeting + sign-off add at minimum +2 sentences
@@ -203,11 +207,19 @@ enum FormalOutputGuard {
     /// "Please suggest five launch tagline ideas for a Mac dictation
     /// app." (1 word overlap = 14%) on 2026-05-27.
     ///
-    /// 0.5 is the empirical threshold:
-    /// - Cross-substituted content lands at 0–20% (trips)
-    /// - Legitimate rambly→polish lands at ~50–55% (passes by margin)
-    /// - Polished-prose round-trip is ~85–100% (passes easily)
-    static let minimumContentRecall: Double = 0.5
+    /// v1.0.14 — lowered 0.5 → 0.20. 0.5 was rejecting GOOD formalizations:
+    /// elevating word choice ("rerun" → "review and update", "stuff" →
+    /// "statements", "legally compliant" → "legal compliance") is exactly
+    /// Formal mode's job, and it drops word-overlap with the input. Measured
+    /// on real E2B output: genuine professional rewrites land at 0.31–0.52
+    /// (the privacy-pages clip was 0.31 and got discarded). True substitution
+    /// (the Gemma-1B example below) is at 0.14, and an answered question is
+    /// caught by the length-ratio (5×). 0.20 admits legitimate elevation while
+    /// still tripping near-total substitution; length-ratio + language-drift
+    /// carry the rest. Validated via the `FormalQuality` bench harness.
+    /// - Cross-substituted content lands at ~0.14 (trips)
+    /// - Legitimate rambly→professional rewrite lands at 0.31–0.55 (passes)
+    static let minimumContentRecall: Double = 0.20
 
     /// Below this Pass-1 character count the content-recall check is
     /// skipped. Aligns with the local-LLM `shortInputBypassChars` so
