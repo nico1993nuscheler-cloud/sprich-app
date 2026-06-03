@@ -1,6 +1,7 @@
 #!/bin/bash
-# Sprich — Open-Source macOS Speech-to-Text
-# One-command installer: builds from source and installs to /Applications
+# Sprich — source-available macOS speech-to-text
+# Optional convenience: builds from source and installs to /Applications.
+# Most people don't need this — just download the signed app from sprichapp.com.
 
 set -e
 

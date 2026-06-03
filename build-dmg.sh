@@ -1,11 +1,13 @@
 #!/bin/bash
-# Sprich — Build a distributable DMG
-# Run after install.sh or a manual Release build.
-# Output: dist/Sprich-<version>.dmg
+# Sprich — Build a local, UNSIGNED DMG (dev iteration only).
+# The signed + notarized release path is notarize.sh — use that for anything
+# you ship. Output: dist/Sprich-<version>.dmg
+#
+# Usage: ./build-dmg.sh [version]   (defaults to "dev" if omitted)
 
 set -e
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-dev}"
 APP_NAME="Sprich"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DIST_DIR="dist"

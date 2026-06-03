@@ -13,22 +13,19 @@
 
 ---
 
-## Try it
+## Get Sprich
 
-The fastest way to use Sprich is the signed, notarized build at
-**[sprichapp.com](https://sprichapp.com)** — a **7-day free trial, no credit
-card**, then a **one-time $59** (one Mac seat, no subscription, all updates on
-the current major version).
+Download the signed, notarized app from **[sprichapp.com](https://sprichapp.com)**,
+drag it to Applications, and you're done — **no Xcode, no terminal, no build
+step.** A **7-day free trial** (no credit card), then a **one-time $59** (one
+Mac seat, no subscription, all updates on the current major version).
 
 > The $59 one-time price is a **limited launch deal**. After the launch window
 > Sprich moves to a subscription; buyers during the launch keep their one-time
 > license.
 
-Trial activates after email verification. The full app is unlocked for 7 days
-with no feature gating; after day 7 it prompts you to upgrade.
-
-If you'd rather build from source for your own personal, non-commercial use,
-that's permitted under BUSL — see [Build from source](#build-from-source) below.
+Prefer to build the source yourself? That's allowed for personal, non-commercial
+use — see [Build from source](#build-from-source) at the bottom.
 
 ## How it works
 
@@ -81,37 +78,6 @@ transcription *and* polish — works with no network and no API key.
 If your default provider is a cloud STT (Groq / OpenAI / Deepgram) and the
 network is unreachable, Sprich auto-falls-back to Local for the current
 dictation only. Your saved provider preference isn't mutated.
-
-## Build from source
-
-For **personal, non-commercial use only** under the BUSL Additional Use Grant —
-see [LICENSE](./LICENSE) for the exact terms.
-
-```bash
-git clone https://github.com/nico1993nuscheler-cloud/sprich-app.git
-cd sprich-app
-xcodebuild -project Sprich.xcodeproj -scheme Sprich -configuration Release build
-open ~/Library/Developer/Xcode/DerivedData/Sprich-*/Build/Products/Release/Sprich.app
-```
-
-Requires:
-- macOS 14 (Sonoma) or later
-- [Xcode](https://apps.apple.com/app/xcode/id497799835) (free)
-- A Groq API key for cloud STT (optional — Local mode works with no key) at
-  [console.groq.com/keys](https://console.groq.com/keys)
-
-### Self-build vs. licensed build — what's different
-
-| | Self-build | Licensed build (sprichapp.com) |
-|---|---|---|
-| Code signing | ad-hoc (Gatekeeper warns on first launch) | Apple Developer ID (no warnings) |
-| Notarization | none | full notarization + stapling |
-| Auto-updates | none — `git pull` + rebuild | Sparkle in-app updates |
-| Support | community (GitHub Issues, best-effort) | priority support@sprichapp.com |
-| Use scope | personal, non-commercial only | full BUSL Additional Use Grant for the buyer |
-
-The two builds are otherwise functionally identical — same Swift source, same
-modes, same languages, same offline engine.
 
 ## Setup
 
@@ -190,6 +156,40 @@ Sprich/
 Built with Swift, SwiftUI, AppKit, AVFoundation,
 [WhisperKit](https://github.com/argmaxinc/WhisperKit) (MIT) for local STT, and a
 local Gemma model for on-device cleanup.
+
+## Build from source
+
+> **You don't need this to use Sprich.** Just download the signed app from
+> [sprichapp.com](https://sprichapp.com) — no Xcode, no build step. This section
+> is only for developers who want to compile the source themselves for
+> **personal, non-commercial use** under the BUSL Additional Use Grant (see
+> [LICENSE](./LICENSE) for the exact terms).
+
+```bash
+git clone https://github.com/nico1993nuscheler-cloud/sprich-app.git
+cd sprich-app
+xcodebuild -project Sprich.xcodeproj -scheme Sprich -configuration Release build
+open ~/Library/Developer/Xcode/DerivedData/Sprich-*/Build/Products/Release/Sprich.app
+```
+
+To build it yourself you'll need:
+- macOS 14 (Sonoma) or later
+- [Xcode](https://apps.apple.com/app/xcode/id497799835) (free) — **only required to compile; not to run the downloaded app**
+- A Groq API key for cloud STT (optional — Local mode works with no key) at
+  [console.groq.com/keys](https://console.groq.com/keys)
+
+### Self-build vs. licensed build — what's different
+
+| | Self-build | Licensed build (sprichapp.com) |
+|---|---|---|
+| Code signing | ad-hoc (Gatekeeper warns on first launch) | Apple Developer ID (no warnings) |
+| Notarization | none | full notarization + stapling |
+| Auto-updates | none — `git pull` + rebuild | Sparkle in-app updates |
+| Support | community (GitHub Issues, best-effort) | priority support@sprichapp.com |
+| Use scope | personal, non-commercial only | full BUSL Additional Use Grant for the buyer |
+
+The two builds are otherwise functionally identical — same Swift source, same
+modes, same languages, same offline engine.
 
 ## License
 
