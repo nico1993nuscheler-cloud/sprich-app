@@ -14,10 +14,10 @@ extension Notification.Name {
 /// re-theme.) When not interactive it dims but keeps the active color.
 @MainActor
 final class ColorToggleTrack: NSView {
-    // Match the established local/cloud coding used by the Network-status
-    // card + menubar glyph (🟢 on-device / 🟡 cloud): green / amber.
+    // Match the established local/online coding used by the Network-status
+    // card + menubar glyph (🟢 on-device / 🔵 online): green / blue.
     static let localColor = NSColor.systemGreen
-    static let cloudColor = NSColor.systemOrange
+    static let cloudColor = NSColor.systemBlue
 
     var isCloud = false { didSet { needsDisplay = true } }
     var dimmed = false { didSet { needsDisplay = true } }
@@ -40,14 +40,14 @@ final class ColorToggleTrack: NSView {
     }
 }
 
-/// The menubar Local⇄Cloud quick switch (v1.0.13). A two-color toggle flanked
-/// by "On this Mac" / "Cloud" labels, hosted as a menu item's custom view so
-/// it's always visible. Left/green = On this Mac, right/blue = Cloud.
+/// The menubar Local⇄Online quick switch (v1.0.13). A two-color toggle flanked
+/// by "On this Mac" / "Online" labels, hosted as a menu item's custom view so
+/// it's always visible. Left/green = On this Mac, right/blue = Online.
 /// `onChange(isCloud)` fires on user flips.
 @MainActor
 final class ProcessingToggleView: NSView {
     private let localLabel = NSTextField(labelWithString: "On this Mac")
-    private let cloudLabel = NSTextField(labelWithString: "Cloud")
+    private let cloudLabel = NSTextField(labelWithString: "Online")
     private let track = ColorToggleTrack()
     private var isInteractive = false
     var onChange: ((Bool) -> Void)?
@@ -1243,9 +1243,9 @@ extension AppDelegate: NSMenuDelegate {
         let canToggle = isLocalFullyReady && isCloudFullyReady
         let tip: String
         if canToggle {
-            tip = "Flip between running on your Mac and in the cloud — switches both transcription and cleanup."
+            tip = "Flip between running on your Mac and online — switches both transcription and cleanup."
         } else if !isCloudFullyReady {
-            tip = "Add a cloud API key (Settings → AI Models) to switch to the cloud from here."
+            tip = "Add an API key for an online provider (Settings → AI Models) to switch online from here."
         } else {
             tip = "Download the on-device models (Settings → AI Models) to switch to your Mac from here."
         }

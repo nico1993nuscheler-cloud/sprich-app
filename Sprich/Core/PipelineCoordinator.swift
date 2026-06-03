@@ -108,7 +108,7 @@ class PipelineCoordinator {
         default:
             return (
                 "Local Whisper model not downloaded",
-                "Open Sprich Settings → Providers → Local to download. Local is your default — Sprich will not silently switch to a cloud provider."
+                "Open Sprich Settings → Providers → Local to download. Local is your default — Sprich will not silently switch to an online provider."
             )
         }
     }

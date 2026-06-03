@@ -55,6 +55,33 @@ final class CorrectionLearner {
     /// despite sounding nothing alike.
     private static let requireFirstLetterMatch = true
 
+    /// Common function words (EN + DE) that must never be learned as the
+    /// `from` side of a correction. Two reasons: (1) a user almost never
+    /// wants to globally find-and-replace "the"/"der", and (2) doing so is
+    /// destructive — a learned "the → type" rewrites *every* "the" in every
+    /// future dictation. These short words also pass the shape guards far too
+    /// easily: "the" → "type" is edit-distance 2 / ratio 0.50 with a matching
+    /// first letter, so nothing else here catches it. The deeper "is this a
+    /// plausible correction at all?" judgment is the deferred local-AI gate
+    /// (v1.0.14); until then this denylist blocks the high-blast-radius cases.
+    private static let stopwordDenylist: Set<String> = [
+        // English
+        "the", "a", "an", "and", "or", "but", "if", "of", "to", "in", "on",
+        "at", "by", "for", "with", "as", "is", "are", "was", "were", "be",
+        "been", "it", "its", "this", "that", "these", "those", "he", "she",
+        "they", "we", "you", "i", "me", "my", "your", "his", "her", "their",
+        "our", "do", "does", "did", "not", "no", "so", "up", "out", "who",
+        "what", "when", "where", "why", "how", "then", "than", "them", "there",
+        "here", "just", "can", "will", "would", "should", "could",
+        // German
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen",
+        "einem", "einer", "und", "oder", "aber", "ist", "sind", "war",
+        "waren", "zu", "im", "auf", "von", "mit", "für", "dass", "nicht",
+        "auch", "sich", "es", "er", "sie", "wir", "ihr", "du", "ich", "mich",
+        "mir", "dich", "dir", "sein", "schon", "noch", "nur", "wie", "wer",
+        "wo", "wann", "warum"
+    ]
+
     /// Bundle IDs that benefit from the Chromium "Grammarly trick":
     /// AXEnhancedUserInterface forces them to build their AX tree.
     private static let chromiumBundleIDPrefixes: [String] = [
@@ -316,6 +343,16 @@ final class CorrectionLearner {
             if alphanumericCore(from) == alphanumericCore(to) {
                 #if DEBUG
                 print("[Sprich] CorrectionLearner: reject \(from)→\(to) — punctuation-only change, not a word correction")
+                #endif
+                continue
+            }
+            // Stopword guard: never learn a common function word as the source
+            // of a global replacement. "the" → "type" (a spurious diff the user
+            // never intended) passes every shape guard but would rewrite every
+            // future "the". Block the whole class.
+            if Self.stopwordDenylist.contains(alphanumericCore(from)) {
+                #if DEBUG
+                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — \"\(from)\" is a common word, too destructive to learn")
                 #endif
                 continue
             }

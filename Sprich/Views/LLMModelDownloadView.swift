@@ -25,7 +25,7 @@ struct LLMModelDownloadView: View {
             Text("Download AI cleanup model")
                 .font(.headline)
 
-            Text("The model runs entirely on your Mac. Your transcribed text never leaves the device while Local is selected — there is no cloud fallback.")
+            Text("The model runs entirely on your Mac. Your transcribed text never leaves the device while Local is selected — there is no online fallback.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -79,7 +79,7 @@ struct LLMModelDownloadView: View {
             Spacer(minLength: 4)
 
             HStack {
-                Button("Keep cloud provider") {
+                Button("Keep online provider") {
                     manager.cancelDownload()
                     onCancel()
                 }

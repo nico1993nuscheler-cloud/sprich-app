@@ -516,14 +516,14 @@ private struct AboutPrivacySection: View {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(networkIndicator.route == .offline
                                   ? Color.green.opacity(0.10)
-                                  : Color.orange.opacity(0.10))
+                                  : Color.blue.opacity(0.10))
                     )
                 }
 
                 SettingsCard {
                     Text("Models")
                         .font(.caption).foregroundColor(.secondary)
-                    Text("On your Mac: Whisper (via WhisperKit) for transcription, Gemma by Google (via llama.cpp) for cleanup. Cloud uses your chosen provider with your own API key.")
+                    Text("On your Mac: Whisper (via WhisperKit) for transcription, Gemma by Google (via llama.cpp) for cleanup. Online uses your chosen provider with your own API key.")
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                     // Mandatory Gemma attribution (verbatim — do not edit).
@@ -1017,7 +1017,7 @@ private struct AIModelsSection: View {
 
                 ProviderCardPair(
                     isLocalSelected: appState.settings.sttProvider.isLocal,
-                    cloudTitle: "Cloud",
+                    cloudTitle: "Online",
                     cloudIcon: "cloud",
                     cloudSubtitle: "Fastest / Highest quality / API key required",
                     cloudDescription: "Audio sent to chosen provider for transcription.",
@@ -1065,7 +1065,7 @@ private struct AIModelsSection: View {
                 } label: {
                     Text(appState.settings.sttProvider.isLocal
                          ? "Configure on-device speech recognition"
-                         : "Configure cloud provider")
+                         : "Configure online provider")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.accentColor)
                 }
@@ -1109,7 +1109,7 @@ private struct AIModelsSection: View {
 
                 ProviderCardPair(
                     isLocalSelected: appState.settings.llmProvider.isLocal,
-                    cloudTitle: "Cloud",
+                    cloudTitle: "Online",
                     cloudIcon: "cloud",
                     cloudSubtitle: "Fastest / Highest quality / API key required",
                     cloudDescription: "Transcribed text sent to chosen provider for cleanup. No storage.",
@@ -1154,7 +1154,7 @@ private struct AIModelsSection: View {
                 } label: {
                     Text(appState.settings.llmProvider.isLocal
                          ? "Configure on-device AI cleanup"
-                         : "Configure cloud provider")
+                         : "Configure online provider")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.accentColor)
                 }
@@ -1284,7 +1284,7 @@ private struct CloudProviderConfigView: View {
     @ViewBuilder
     private var subProviderPicker: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(kind == .stt ? "Cloud provider" : "Cloud provider")
+            Text(kind == .stt ? "Online provider" : "Online provider")
                 .font(.caption).foregroundColor(.secondary)
             switch kind {
             case .stt:
@@ -1346,7 +1346,7 @@ private struct CloudProviderConfigView: View {
         switch kind {
         case .stt:
             switch appState.settings.sttProvider {
-            case .groq:     return "Fastest & cheapest (~$0.0007/min). Whisper large-v3 via Groq cloud."
+            case .groq:     return "Fastest & cheapest (~$0.0007/min). Whisper large-v3 via Groq."
             case .openai:   return "Standard Whisper API (~$0.006/min). Most reliable."
             case .deepgram: return "Nova-3 model (~$0.008/min). Excellent real-time performance."
             case .local:    return ""
@@ -1537,7 +1537,7 @@ private struct LocalProviderConfigView: View {
             if kind == .llm {
                 // Honest copy reinforcing Sprint 2F Decision 5a/5b/5c —
                 // local LLM never falls back to cloud silently.
-                Text("Runs fully on your Mac. There's no cloud fallback — to use a cloud model, switch to the Cloud card above.")
+                Text("Runs fully on your Mac. There's no online fallback — to use an online model, switch to the Online card above.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .padding(.top, 2)
