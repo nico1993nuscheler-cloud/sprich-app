@@ -305,6 +305,20 @@ final class CorrectionLearner {
         }
 
         for (from, to) in subs {
+            // Meaningful-change guard: reject "corrections" that only add or
+            // remove surrounding punctuation (e.g. "gratis" → "gratis'",
+            // "report" → "report."). Once leading/trailing non-alphanumerics
+            // are stripped and case is folded, if the two tokens are equal then
+            // nothing a find-and-replace should learn actually changed — the
+            // user just left a stray character. Interior punctuation is
+            // preserved, so legit contraction fixes ("cant" → "can't") still
+            // pass through to the edit-distance check below.
+            if alphanumericCore(from) == alphanumericCore(to) {
+                #if DEBUG
+                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — punctuation-only change, not a word correction")
+                #endif
+                continue
+            }
             if to.count < Self.minCorrectedWordLen {
                 #if DEBUG
                 print("[Sprich] CorrectionLearner: reject \(from)→\(to) — corrected word <3 chars")
@@ -467,6 +481,14 @@ final class CorrectionLearner {
         while i > 0 { out.append(AlignCell(orig: a[i - 1], edited: nil)); i -= 1 }
         while j > 0 { out.append(AlignCell(orig: nil, edited: b[j - 1])); j -= 1 }
         return out.reversed()
+    }
+
+    /// Lowercased token with leading/trailing non-alphanumeric characters
+    /// stripped. Interior characters (including contraction apostrophes) are
+    /// kept, so this folds away only *surrounding* punctuation and casing —
+    /// exactly the noise that produced bogus learns like "gratis" → "gratis'".
+    func alphanumericCore(_ s: String) -> String {
+        s.lowercased().trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
     }
 
     private func passesEditDistanceRatio(_ a: String, _ b: String) -> Bool {
