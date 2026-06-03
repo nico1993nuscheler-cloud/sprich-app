@@ -63,7 +63,7 @@ enum HardwareProbe {
             case .eligible:
                 return "Expected response time: ~2 s. We recommend staying with the default Gemma 1B model; bigger models may slow things down or run out of RAM."
             case .notSupported:
-                return "Local mode requires an Apple Silicon Mac with 8 GB+ RAM and macOS 13+. You can use Sprich with cloud LLMs instead — same dictation, your audio still never leaves your device."
+                return "Local mode requires an Apple Silicon Mac with 8 GB+ RAM and macOS 13+. You can use Sprich with online LLMs instead — same dictation, your audio still never leaves your device."
             }
         }
     }

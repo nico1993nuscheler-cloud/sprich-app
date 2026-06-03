@@ -315,7 +315,7 @@ actor LocalLLMService {
             try await loadIfNeeded(spec: activeSpec)
         }
         guard let client else {
-            throw SprichError.localLLMNotReady("Model failed to load. Check Settings → Providers → Local LLM, or switch to a cloud provider.")
+            throw SprichError.localLLMNotReady("Model failed to load. Check Settings → Providers → Local LLM, or switch to an online provider.")
         }
 
         // Concurrent-generation guard — see `isGenerating` doc above.
@@ -357,7 +357,7 @@ actor LocalLLMService {
             if mode == .formal {
                 return sanitizedText
             } else {
-                throw SprichError.localLLMNotReady("Dictation too long for the local model right now. Try shorter, or switch to a cloud provider in Settings.")
+                throw SprichError.localLLMNotReady("Dictation too long for the local model right now. Try shorter, or switch to an online provider in Settings.")
             }
         }
 

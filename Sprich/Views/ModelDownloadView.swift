@@ -66,7 +66,7 @@ struct ModelDownloadView: View {
             Spacer(minLength: 4)
 
             HStack {
-                Button("Keep cloud provider") {
+                Button("Keep online provider") {
                     manager.cancelDownload()
                     onCancel()
                 }

@@ -510,7 +510,7 @@ struct OnboardingView: View {
     private var whereAIRunsPair: some View {
         ProviderCardPair(
             isLocalSelected: providerChoice.isLocal,
-            cloudTitle: "Cloud",
+            cloudTitle: "Online",
             cloudIcon: "cloud",
             cloudSubtitle: "Fastest / Highest quality / API key required",
             cloudDescription: "Audio and text are sent to your provider (Groq) for transcription and cleanup. No downloads, no storage.",
@@ -686,7 +686,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("This Mac isn't a match for on-device AI cleanup.")
                     .font(.system(size: 12, weight: .semibold))
-                Text("Speech-to-text still runs on your Mac — only AI cleanup uses a cloud provider with your own API key. Pick Cloud above to continue.")
+                Text("Speech-to-text still runs on your Mac — only AI cleanup uses an online provider with your own API key. Pick Online above to continue.")
                     .font(.caption).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
