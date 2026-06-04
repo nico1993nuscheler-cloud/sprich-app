@@ -219,6 +219,38 @@ class LLMService {
         return min(1024, max(estimate, 80))
     }
 
+    // MARK: - Correction-gate raw completion (Layer 2, v1.0.14)
+
+    /// Minimal single-word yes/no completion for `CorrectionSemanticGate`'s
+    /// cloud fallback tier. Bypasses `cleanup()`'s Formal machinery (prompt
+    /// composition, `FormalOutputGuard`) — the gate owns its strict prompt and
+    /// parses the raw output. Dispatches to the configured provider with a
+    /// tiny token budget; the gate already sanitized FROM/TO, and `system` /
+    /// `user` are app-controlled scaffolding.
+    func classifyYesNo(
+        system: String,
+        user: String,
+        provider: LLMProviderType,
+        settings: AppSettings
+    ) async throws -> String {
+        // We only need "yes"/"no" — a handful of tokens is plenty.
+        let maxTokens = 4
+        switch provider {
+        case .groq:
+            return try await callGroqLLM(systemPrompt: system, userMessage: user, model: settings.groqLLMModel, maxTokens: maxTokens)
+        case .claude:
+            return try await callClaude(systemPrompt: system, userMessage: user, model: settings.claudeModel, maxTokens: maxTokens)
+        case .google:
+            return try await callGemini(systemPrompt: system, userMessage: user, model: settings.googleModel, maxTokens: maxTokens)
+        case .openai:
+            return try await callOpenAI(systemPrompt: system, userMessage: user, model: settings.openAILLMModel, maxTokens: maxTokens)
+        case .local:
+            // Unreachable: the gate only routes here for a cloud provider with
+            // a key (`firstCloudLLMWithKey()` never returns `.local`).
+            throw SprichError.localLLMNotReady("Correction gate cloud path invoked for the local provider.")
+        }
+    }
+
     // MARK: - Groq LLM (fastest — reuses STT API key)
 
     private func callGroqLLM(

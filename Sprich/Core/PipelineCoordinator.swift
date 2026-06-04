@@ -435,6 +435,53 @@ class PipelineCoordinator {
     }
 
     /// Stop recording and process through the pipeline.
+    // MARK: - Whisper silence-hallucination filter
+
+    /// Canned phrases Whisper emits when fed silence/noise with no real speech
+    /// (a well-known Whisper failure mode). NEVER a legitimate dictation, so
+    /// dropped regardless of signal. The energy gate in `AudioRecorder` catches
+    /// most silent clips; this is the safety net for clips with faint ambient
+    /// noise that clear it but still transcribe to a canned phrase.
+    private static let alwaysDropHallucinations: Set<String> = [
+        "thanks for watching", "thank you for watching", "thanks for watching everyone",
+        "thank you for watching this video", "transcription by castingwords", "castingwords",
+        "subtitles by the amara org community", "subtitles by amara org", "amara org",
+        "please subscribe", "subscribe to my channel", "like and subscribe"
+    ]
+
+    /// Short phrases that ARE plausible real dictations ("thanks", "okay") but
+    /// are also Whisper's favourite silence-hallucinations. Dropped ONLY when the
+    /// clip carried no real speech energy (peak below the speech threshold), so a
+    /// genuinely-spoken "Thanks." (which has energy) is preserved.
+    private static let lowEnergyHallucinations: Set<String> = [
+        "thank you", "thank you very much", "thanks", "you", "bye", "okay", "ok", "so", "um", "uh"
+    ]
+
+    /// Peak RMS below which a canned phrase is treated as a hallucination rather
+    /// than real speech. Above the silence gate, below normal speech energy.
+    private static let hallucinationSpeechPeak: Float = 0.045
+
+    /// Lowercase, strip non-alphanumerics, collapse whitespace — for matching a
+    /// transcript against the canned-phrase sets above.
+    private static func normalizeForHallucinationMatch(_ s: String) -> String {
+        let mapped = s.lowercased().unicodeScalars.map { sc -> Character in
+            CharacterSet.alphanumerics.contains(sc) ? Character(sc) : " "
+        }
+        return String(mapped).split(separator: " ").joined(separator: " ")
+    }
+
+    /// Returns the matched canned phrase if `transcript` is a Whisper
+    /// silence-hallucination that should be dropped, else nil. The returned
+    /// string is always a hardcoded denylist member (not user content), so it is
+    /// safe to log.
+    private static func whisperHallucinationMatch(_ transcript: String, peak: Float) -> String? {
+        let norm = normalizeForHallucinationMatch(transcript)
+        guard !norm.isEmpty else { return nil }
+        if alwaysDropHallucinations.contains(norm) { return norm }
+        if lowEnergyHallucinations.contains(norm), peak < hallucinationSpeechPeak { return norm }
+        return nil
+    }
+
     func stopAndProcess() async {
         #if DEBUG
         print("[Sprich] stopAndProcess() entered — status=\(appState.status), currentMode=\(currentMode?.displayName ?? "nil")")
@@ -525,6 +572,20 @@ class PipelineCoordinator {
             #endif
 
             guard !rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                RecordingOverlayController.shared.dismiss()
+                appState.status = .ready
+                return
+            }
+
+            // Silence-hallucination filter: even past the recorder's energy gate,
+            // a faint-noise clip can transcribe to a canned Whisper phrase
+            // ("Thank you.", "Transcription by CastingWords."). Drop those so we
+            // never paste — or auto-learn a correction from — phantom text.
+            if let hallucination = Self.whisperHallucinationMatch(rawTranscript, peak: recorder.lastPeakLevel) {
+                #if DEBUG
+                print(String(format: "[Sprich] stopAndProcess: dropping Whisper silence-hallucination \"%@\" (peak %.4f)",
+                             hallucination, recorder.lastPeakLevel))
+                #endif
                 RecordingOverlayController.shared.dismiss()
                 appState.status = .ready
                 return
@@ -679,7 +740,8 @@ class PipelineCoordinator {
         CorrectionLearner.shared.watchForCorrection(
             targetPid: targetPid,
             originalText: originalText,
-            mode: mode
+            mode: mode,
+            settings: appState.settings
         ) { [weak self] from, to in
             Task { @MainActor in
                 guard let self else { return }

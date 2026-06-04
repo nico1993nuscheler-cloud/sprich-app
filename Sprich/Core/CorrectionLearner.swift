@@ -109,7 +109,15 @@ final class CorrectionLearner {
         let originalWords: [String]
         let deadline: Date
         let appBundleID: String?
+        /// Snapshot of the user's settings at watch-start. `AppSettings` is a
+        /// value type, so this is a safe immutable copy for the Layer 2 gate's
+        /// model routing (provider selection + resolving the local LLM spec).
+        let settings: AppSettings
         var seenPairs: Set<String> = []
+        /// Candidate keys whose async Layer 2 gate is in flight. Prevents the
+        /// 0.5 s poll from re-dispatching the same pair while its gate runs;
+        /// the key moves to `seenPairs` once the gate returns.
+        var inFlightGate: Set<String> = []
         var observer: AXObserver?
         var element: AXUIElement
         var pollTimer: Timer?
@@ -125,12 +133,13 @@ final class CorrectionLearner {
         var lastChangeTick: Int = 0
         var lastDiffedValue: String? = nil
 
-        init(targetPid: pid_t, originalText: String, appBundleID: String?) {
+        init(targetPid: pid_t, originalText: String, appBundleID: String?, settings: AppSettings) {
             self.targetPid = targetPid
             self.originalText = originalText
             self.originalWords = Self.tokenize(originalText)
             self.deadline = Date().addingTimeInterval(CorrectionLearner.windowSeconds)
             self.appBundleID = appBundleID
+            self.settings = settings
             self.element = AXUIElementCreateApplication(targetPid)
         }
 
@@ -152,6 +161,7 @@ final class CorrectionLearner {
         targetPid: pid_t,
         originalText: String,
         mode: TranscriptionMode,
+        settings: AppSettings,
         onCorrection: @escaping (_ from: String, _ to: String) -> Void
     ) {
         teardown()
@@ -161,7 +171,7 @@ final class CorrectionLearner {
         guard trimmed.utf8.count <= Self.maxOutputBytes else { return }
 
         let bundleID = NSRunningApplication(processIdentifier: targetPid)?.bundleIdentifier
-        let session = Session(targetPid: targetPid, originalText: trimmed, appBundleID: bundleID)
+        let session = Session(targetPid: targetPid, originalText: trimmed, appBundleID: bundleID, settings: settings)
         current = session
 
         #if DEBUG
@@ -309,7 +319,39 @@ final class CorrectionLearner {
         let stableTicks = session.tickCount - session.lastChangeTick
         if stableTicks < Self.stabilityTicksRequired { return }
         if fieldValue == session.lastDiffedValue { return }
+
+        // Layer 2 (v1.0.14): defer the whole evaluation while a dictation is
+        // recording/processing so the async semantic gate never competes with
+        // the live pipeline for the local model. We have NOT recorded
+        // `lastDiffedValue` yet, so the next quiet tick re-evaluates this exact
+        // field state and the gate runs then. (The gate's own `isGenerating`
+        // guard is the backstop for the narrow race where a dictation starts
+        // between this check and the gate firing.)
+        if NetworkStatusIndicator.shared.isDictationActive {
+            #if DEBUG
+            print("[Sprich] CorrectionLearner: deferring diff — dictation active")
+            #endif
+            return
+        }
+
         session.lastDiffedValue = fieldValue
+
+        // Robustness guard (v1.0.14): if the dictated text is still present
+        // VERBATIM somewhere in the field, the user has not edited it in place
+        // — they typed elsewhere, appended another dictation, or left it
+        // untouched. Diffing the dictation against the rest of an accumulated
+        // field only fabricates spurious pairs by aligning the dictation's
+        // words to a coincidentally-similar OLDER region (a new "Okay this is
+        // GitHub" mis-aligning to an earlier "Okay this is just …", inventing
+        // "GitHub → just"). There is no in-place correction here, so skip.
+        // (Mirrors OpenWhispr's `indexOf(originalText)` early-return.)
+        if fieldValue.contains(session.originalText) {
+            #if DEBUG
+            print("[Sprich] CorrectionLearner: dictation still intact in field — no in-place edit, skipping diff")
+            #endif
+            return
+        }
+
         #if DEBUG
         print("[Sprich] CorrectionLearner: field stable for \(stableTicks) ticks — diffing")
         #endif
@@ -334,13 +376,17 @@ final class CorrectionLearner {
         for (from, to) in subs {
             // Meaningful-change guard: reject "corrections" that only add or
             // remove surrounding punctuation (e.g. "gratis" → "gratis'",
-            // "report" → "report."). Once leading/trailing non-alphanumerics
-            // are stripped and case is folded, if the two tokens are equal then
-            // nothing a find-and-replace should learn actually changed — the
-            // user just left a stray character. Interior punctuation is
-            // preserved, so legit contraction fixes ("cant" → "can't") still
-            // pass through to the edit-distance check below.
-            if alphanumericCore(from) == alphanumericCore(to) {
+            // "report" → "report."). Strip leading/trailing non-alphanumerics
+            // and compare — if equal, the user just left a stray character.
+            // CASE IS PRESERVED here (unlike `alphanumericCore`) so that a
+            // capitalization fix — a brand/acronym like "github" → "GitHub" or
+            // "hr" → "HR" — is NOT treated as a no-op and still reaches the
+            // context-aware gate, which decides whether it's worth learning.
+            // Interior punctuation is preserved, so contraction fixes
+            // ("cant" → "can't") also pass through.
+            let fromPunctStripped = from.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+            let toPunctStripped = to.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+            if fromPunctStripped == toPunctStripped {
                 #if DEBUG
                 print("[Sprich] CorrectionLearner: reject \(from)→\(to) — punctuation-only change, not a word correction")
                 #endif
@@ -348,46 +394,82 @@ final class CorrectionLearner {
             }
             // Stopword guard: never learn a common function word as the source
             // of a global replacement. "the" → "type" (a spurious diff the user
-            // never intended) passes every shape guard but would rewrite every
-            // future "the". Block the whole class.
+            // never intended) would rewrite every future "the" — too destructive
+            // to ever auto-learn, regardless of context. This is the one hard
+            // blast-radius block we keep ahead of the context-aware gate.
             if Self.stopwordDenylist.contains(alphanumericCore(from)) {
                 #if DEBUG
                 print("[Sprich] CorrectionLearner: reject \(from)→\(to) — \"\(from)\" is a common word, too destructive to learn")
                 #endif
                 continue
             }
-            if to.count < Self.minCorrectedWordLen {
+            // First-letter guard (case-insensitive): a real mis-transcription
+            // or typo almost always preserves the first sound/letter — "synch"
+            // → "Sync", "Sprick" → "Sprich", "tomorrow" → "Tomorroww", "hr" →
+            // "HR" all share it. A changed first letter signals the diff aligned
+            // two UNRELATED words (the noise the LCS produces when a short new
+            // dictation is compared against a field full of older text: "HR" →
+            // "UI", "send" → "need", "Okay" → "xOkay"). Case is folded so a pure
+            // capitalization fix ("github" → "GitHub") still passes. This is the
+            // one similarity filter we keep; min-length and edit-distance ratio
+            // were removed in v1.0.14 so short/odd brand spellings ("sync" → "S")
+            // can reach the context-aware gate, which makes the real call.
+            if from.first?.lowercased() != to.first?.lowercased() {
                 #if DEBUG
-                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — corrected word <3 chars")
-                #endif
-                continue
-            }
-            if Self.requireFirstLetterMatch,
-               from.first?.lowercased() != to.first?.lowercased() {
-                #if DEBUG
-                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — different first letter (likely rewrite, not phonetic correction)")
-                #endif
-                continue
-            }
-            if !passesEditDistanceRatio(from, to) {
-                #if DEBUG
-                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — edit-distance ratio too high")
+                print("[Sprich] CorrectionLearner: reject \(from)→\(to) — different first letter (diff noise, not a correction)")
                 #endif
                 continue
             }
 
             let key = (from + "→" + to).lowercased()
             if session.seenPairs.contains(key) { continue }
-            session.seenPairs.insert(key)
+            if session.inFlightGate.contains(key) { continue }
 
-            // Skip if already present in the user's replacements.
-            // We check this via the handler — the handler closure has
-            // a reference to AppSettings; we delegate the check there
-            // by passing the candidate and letting the caller decide.
-            #if DEBUG
-            print("[Sprich] CorrectionLearner: proposing \(from) → \(to)")
-            #endif
-            onCorrectionHandler?(from, to)
+            // Layer 2 (v1.0.14): the deterministic guards above measure string
+            // SHAPE. The semantic gate is the final "is this a plausible
+            // correction at all?" judgment, and it's an async model call — so
+            // dispatch it and propose on completion WITHOUT blocking the 0.5 s
+            // poll loop. `inFlightGate` keeps the next tick from re-dispatching
+            // the same pair while the gate runs; `seenPairs` takes over once it
+            // returns. Capture the session so the teardown race can be checked:
+            // the 30 s window may end (or a new dictation start a new session)
+            // before the gate returns — drop the result if so.
+            session.inFlightGate.insert(key)
+            let dictatedText = session.originalText
+            let editedText = fieldValue
+            Task { @MainActor [weak self] in
+                let decision = await CorrectionSemanticGate.judge(
+                    from: from,
+                    to: to,
+                    dictatedText: dictatedText,
+                    editedText: editedText,
+                    settings: session.settings
+                )
+                guard let self, self.current === session else {
+                    #if DEBUG
+                    print("[Sprich] CorrectionLearner: gate result for \(from)→\(to) dropped — session no longer current")
+                    #endif
+                    return
+                }
+                session.inFlightGate.remove(key)
+                session.seenPairs.insert(key)
+                switch decision {
+                case .allow:
+                    #if DEBUG
+                    print("[Sprich] CorrectionLearner: Layer 2 allow — proposing \(from) → \(to)")
+                    #endif
+                    self.onCorrectionHandler?(from, to)
+                case .noModel:
+                    #if DEBUG
+                    print("[Sprich] CorrectionLearner: Layer 2 no model — proposing \(from) → \(to) (deterministic-only)")
+                    #endif
+                    self.onCorrectionHandler?(from, to)
+                case .reject:
+                    #if DEBUG
+                    print("[Sprich] CorrectionLearner: Layer 2 reject — \(from) → \(to) not a plausible correction")
+                    #endif
+                }
+            }
         }
     }
 
@@ -429,7 +511,13 @@ final class CorrectionLearner {
             let overlap = window.reduce(0.0) { acc, w in
                 acc + (origSet.contains(w.lowercased()) ? 1.0 : 0.0)
             } / Double(windowSize)
-            if overlap > bestOverlap {
+            // `>=`, not `>`: on a tie, prefer the LATEST matching region. We
+            // paste the dictation at the cursor (typically the end of the
+            // field), so when an accumulated field contains an older region
+            // with the same overlap (e.g. a previous "Okay this is just …"),
+            // the user's actual just-edited dictation is the later one. Taking
+            // the first match aligned edits to stale text and fabricated pairs.
+            if overlap >= bestOverlap {
                 bestOverlap = overlap
                 bestStart = start
             }
@@ -449,28 +537,43 @@ final class CorrectionLearner {
         let alignment = lcsAlign(origWords, editedWords)
         var subs: [(String, String)] = []
         var i = 0
-        while i < alignment.count - 1 {
+        while i < alignment.count {
             let a = alignment[i]
-            let b = alignment[i + 1]
-            // Pattern 1: deletion, then insertion.
-            if let origWord = a.orig, a.edited == nil,
-               let editedWord = b.edited, b.orig == nil {
-                if origWord.lowercased() != editedWord.lowercased() {
-                    subs.append((origWord, editedWord))
-                }
-                i += 2
+            // Pattern 0: a cell LCS aligned as a "match" (same word under
+            // case-folding) but whose EXACT form differs — a capitalization or
+            // exact-form correction ("github" → "GitHub", "hr" → "HR"). lcsAlign
+            // matches case-insensitively so these align as a match, not a
+            // delete+insert; without this branch they'd be invisible and brand/
+            // acronym capitalization fixes could never be learned. The
+            // context-aware gate still judges whether it's worth learning (so an
+            // incidental sentence-start auto-capitalization is filtered there).
+            if let origWord = a.orig, let editedWord = a.edited, origWord != editedWord {
+                subs.append((origWord, editedWord))
+                i += 1
                 continue
             }
-            // Pattern 2: insertion, then deletion. LCS reconstruction
-            // can emit this ordering for the same logical substitution
-            // depending on tie-breaking; treat it identically.
-            if let editedWord = a.edited, a.orig == nil,
-               let origWord = b.orig, b.edited == nil {
-                if origWord.lowercased() != editedWord.lowercased() {
-                    subs.append((origWord, editedWord))
+            if i + 1 < alignment.count {
+                let b = alignment[i + 1]
+                // Pattern 1: deletion, then insertion.
+                if let origWord = a.orig, a.edited == nil,
+                   let editedWord = b.edited, b.orig == nil {
+                    if origWord.lowercased() != editedWord.lowercased() {
+                        subs.append((origWord, editedWord))
+                    }
+                    i += 2
+                    continue
                 }
-                i += 2
-                continue
+                // Pattern 2: insertion, then deletion. LCS reconstruction
+                // can emit this ordering for the same logical substitution
+                // depending on tie-breaking; treat it identically.
+                if let editedWord = a.edited, a.orig == nil,
+                   let origWord = b.orig, b.edited == nil {
+                    if origWord.lowercased() != editedWord.lowercased() {
+                        subs.append((origWord, editedWord))
+                    }
+                    i += 2
+                    continue
+                }
             }
             i += 1
         }
@@ -527,6 +630,7 @@ final class CorrectionLearner {
     func alphanumericCore(_ s: String) -> String {
         s.lowercased().trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
     }
+
 
     private func passesEditDistanceRatio(_ a: String, _ b: String) -> Bool {
         let d = levenshtein(a.lowercased(), b.lowercased())
