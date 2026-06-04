@@ -21,6 +21,27 @@ class AudioRecorder {
     private var sampleRate: Double = 16000
     private let bufferQueue = DispatchQueue(label: "com.niconuscheler.sprich.audiobuffer")
 
+    /// Loudest per-buffer RMS seen during the current recording (raw, 0.0–1.0,
+    /// pre-normalization). Updated on the audio thread under `bufferQueue`. Used
+    /// as a lightweight energy/VAD signal: a near-silent clip is dropped before
+    /// STT (otherwise Whisper hallucinates canned phrases like "Thank you." /
+    /// "Transcription by CastingWords." on silence). OpenWhispr solves the same
+    /// problem by bundling a Silero VAD model into whisper.cpp; an energy gate is
+    /// the provider-agnostic equivalent that also works for our cloud STT paths.
+    private var peakLevel: Float = 0
+
+    /// Peak RMS and duration of the LAST stopped recording, exposed so the
+    /// pipeline can apply a secondary hallucination filter (drop a canned
+    /// Whisper phrase only when the clip carried no real speech energy).
+    private(set) var lastPeakLevel: Float = 0
+    private(set) var lastDurationSeconds: Double = 0
+
+    /// Peak RMS below which a clip is treated as silence and dropped outright in
+    /// `stopRecording`. Conservative — normal (even quiet) speech peaks well
+    /// above this; only the mic noise floor falls below. Tunable; `lastPeakLevel`
+    /// is logged in DEBUG so real-mic values can calibrate it.
+    static let silencePeakThreshold: Float = 0.010
+
     /// Called on each audio buffer with the current RMS level (0.0–1.0).
     var onAudioLevel: ((Float) -> Void)?
 
@@ -43,8 +64,8 @@ class AudioRecorder {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         self.sampleRate = nativeFormat.sampleRate
 
-        // Reset in-memory buffer for this recording.
-        bufferQueue.sync { pcmBuffer = Data() }
+        // Reset in-memory buffer + peak level for this recording.
+        bufferQueue.sync { pcmBuffer = Data(); peakLevel = 0 }
 
         // Install tap to capture audio
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
@@ -81,6 +102,7 @@ class AudioRecorder {
                     sum += channelData[i] * channelData[i]
                 }
                 let rms = sqrtf(sum / Float(max(frameCount, 1)))
+                self.bufferQueue.sync { if rms > self.peakLevel { self.peakLevel = rms } }
                 let normalized = min(1.0, rms * 8)
                 DispatchQueue.main.async {
                     self.onAudioLevel?(normalized)
@@ -108,12 +130,34 @@ class AudioRecorder {
         audioEngine = nil
 
         let pcm = bufferQueue.sync { pcmBuffer }
+        let peak = bufferQueue.sync { peakLevel }
         // Zero out our copy so the samples don't linger in the instance's heap.
         bufferQueue.sync { pcmBuffer = Data() }
+
+        // Record peak + duration for the pipeline's secondary hallucination
+        // filter, BEFORE any early-return so they're valid even on a drop.
+        lastPeakLevel = peak
+        lastDurationSeconds = sampleRate > 0 ? Double(pcm.count) / (sampleRate * 2.0) : 0
+        #if DEBUG
+        print(String(format: "[Sprich] AudioRecorder: stop — %.2fs, peak RMS %.4f, %d bytes",
+                     lastDurationSeconds, peak, pcm.count))
+        #endif
 
         // Return nil if recording was too short (< ~0.25s of mono 16kHz)
         // 16kHz * 2 bytes * 0.25s = 8000 bytes
         if pcm.count < 8000 { return nil }
+
+        // Energy gate (lightweight VAD): a clip whose loudest moment never rose
+        // above the noise floor is silence — sending it to Whisper produces a
+        // hallucinated canned phrase ("Thank you.", "Transcription by
+        // CastingWords."). Drop it here so the pipeline dismisses cleanly.
+        if peak < Self.silencePeakThreshold {
+            #if DEBUG
+            print(String(format: "[Sprich] AudioRecorder: dropping silent clip (peak %.4f < %.4f)",
+                         peak, Self.silencePeakThreshold))
+            #endif
+            return nil
+        }
 
         return encodeWAV(pcm: pcm, sampleRate: Int(sampleRate), channels: 1, bitsPerSample: 16)
     }

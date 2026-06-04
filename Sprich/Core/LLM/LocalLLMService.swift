@@ -457,6 +457,83 @@ actor LocalLLMService {
         }
     }
 
+    // MARK: - Correction-gate raw completion (Layer 2, v1.0.14)
+
+    /// True when a model is already loaded in memory. `CorrectionSemanticGate`
+    /// uses this to AVOID cold-loading the 3 GB model just to judge a correction
+    /// — if it's not already warm (e.g. Literal-mode usage, or an online user
+    /// who merely has the model on disk), the gate falls back to the cloud tier
+    /// or skips, rather than triggering a multi-second load that competes with
+    /// the live dictation pipeline.
+    var isWarm: Bool { client != nil }
+
+    /// Minimal single-word yes/no completion for `CorrectionSemanticGate`.
+    /// Deliberately bypasses `cleanup()`'s Formal-mode machinery (prompt
+    /// composition, short-input bypass, `FormalOutputGuard`) — the gate owns
+    /// its own strict prompt and parses the raw output itself.
+    ///
+    /// Reuses the cached `client`, the `isGenerating` re-entrancy guard, and
+    /// the same early-stop / mid-decode context-poison handling as `cleanup`
+    /// (`unload()` + background reprewarm), so a gate call can never leave the
+    /// llama context in the half-decoded state that crashes the next dictation
+    /// in `Batch.swift:20`. `CorrectionLearner` only dispatches the gate while
+    /// no dictation is active, but if a dictation's `cleanup` is mid-flight
+    /// the `isGenerating` guard throws here and the gate fails closed.
+    func classifyYesNo(system: String, user: String, spec: LocalLLMModelSpec) async throws -> String {
+        // The gate calls this only when the model is already warm (see
+        // `CorrectionSemanticGate` Tier 1), so the common path just reuses the
+        // loaded client — we deliberately do NOT unload/reload on a spec
+        // mismatch here, to avoid disturbing the user's warm model for a
+        // background correction check. `spec` is only used for the defensive
+        // lazy-load if the model was unloaded between the warm check and now.
+        if client == nil {
+            try await loadIfNeeded(spec: spec)
+        }
+        guard let client else {
+            throw SprichError.localLLMNotReady("Model failed to load for the correction gate.")
+        }
+
+        if isGenerating {
+            throw SprichError.localLLMNotReady("Local model busy with a dictation; skipping correction gate.")
+        }
+        isGenerating = true
+        defer { isGenerating = false }
+
+        lastUsedAt = Date()
+
+        // We only need "yes"/"no". A tiny char budget caps any runaway and,
+        // like cleanup, an early-stop `break` poisons the KV cache — so we
+        // unload + background-reprewarm afterward (see cleanup for the full
+        // rationale). The per-spec `extraEOSTokens` handle the clean-finish
+        // case so a well-behaved one-word answer never even hits the budget.
+        let charBudget = 12
+        let input = LLMInput.chat([.system(system), .user(user)])
+        var raw = ""
+        var earlyStopped = false
+        do {
+            let generator = try client.textStream(from: input)
+            for try await chunk in generator {
+                raw += chunk
+                if raw.count > charBudget {
+                    earlyStopped = true
+                    break
+                }
+            }
+        } catch {
+            #if DEBUG
+            print("[Sprich][LocalLLM] correction-gate generation error, unloading client: \(error)")
+            #endif
+            unload()
+            scheduleBackgroundPrewarm(spec: spec)
+            throw error
+        }
+        if earlyStopped {
+            unload()
+            scheduleBackgroundPrewarm(spec: spec)
+        }
+        return raw
+    }
+
     /// Resolve the on-disk file via `LLMModelManager` and call `prewarm`.
     /// Called from `cleanup` on cold start.
     private func loadIfNeeded(spec: LocalLLMModelSpec) async throws {
