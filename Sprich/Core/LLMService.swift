@@ -40,7 +40,8 @@ class LLMService {
         mode: TranscriptionMode,
         editableLayer: String,
         surface: Surface,
-        adaptToSurface: Bool
+        adaptToSurface: Bool,
+        glossaryReplacements: [GlossaryReplacement] = []
     ) -> String {
         // Literal never reaches the LLM; return the core for completeness.
         guard mode == .formal || mode == .custom else { return core }
@@ -51,7 +52,37 @@ class LLMService {
             let hint = surface.promptHint
             if !hint.isEmpty { prompt += "\n\n" + hint }
         }
+        // Reinforce learned corrections so the rewrite doesn't re-spell or
+        // translate a term the user explicitly corrected. The deterministic
+        // post-LLM `applyGlossary` re-pass is the hard guarantee; this just
+        // reduces how often the LLM introduces a NEW variant the re-pass
+        // can't match. Capped to bound token cost.
+        if let locked = lockedSpellingsLine(from: glossaryReplacements) {
+            prompt += "\n\n" + locked
+        }
         return prompt
+    }
+
+    /// Build a "preserve these exact spellings" instruction from the user's
+    /// glossary replacement targets (the `to` side — the spelling they want).
+    /// Returns nil when there are none. Deduplicated (case-insensitive) and
+    /// capped at 20 terms so a long learned-corrections list can't bloat the
+    /// prompt. Pure helper for testability.
+    static func lockedSpellingsLine(from replacements: [GlossaryReplacement]) -> String? {
+        var seen = Set<String>()
+        var terms: [String] = []
+        for rep in replacements {
+            let term = rep.to.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { continue }
+            let key = term.lowercased()
+            if seen.insert(key).inserted {
+                terms.append(term)
+                if terms.count >= 20 { break }
+            }
+        }
+        guard !terms.isEmpty else { return nil }
+        return "Preserve these exact spellings verbatim wherever they appear — never alter, translate, or re-spell them: "
+            + terms.joined(separator: ", ")
     }
 
     private static func throwIfRateLimited(
@@ -116,7 +147,8 @@ class LLMService {
             mode: mode,
             editableLayer: settings.editableLayer(for: mode),
             surface: surface,
-            adaptToSurface: settings.adaptToSurface
+            adaptToSurface: settings.adaptToSurface,
+            glossaryReplacements: settings.glossaryReplacements
         )
 
         // Per-dictation output budget. The Formal Pass-2 contract is "polish,

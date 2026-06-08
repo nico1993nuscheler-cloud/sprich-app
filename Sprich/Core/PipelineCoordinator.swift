@@ -517,6 +517,18 @@ class PipelineCoordinator {
                 print("[Sprich] stopAndProcess: recorder.stopRecording returned nil — no audio, dismissing")
                 #endif
                 RecordingOverlayController.shared.dismiss()
+                // If the user clearly meant to dictate (held the hotkey well
+                // past an accidental tap) but the clip came through silent —
+                // mic muted, wrong input device, or the engine hadn't woken —
+                // tell them instead of silently doing nothing (the "I spoke
+                // but nothing pasted" confusion). Short taps stay silent so an
+                // accidental key-brush doesn't nag. `lastDurationSeconds` is
+                // the real held duration even though the audio was dropped.
+                if recorder.lastDurationSeconds >= 1.2 {
+                    HintBannerController.shared.present(
+                        message: "Didn’t catch that — check your microphone and try again."
+                    )
+                }
                 appState.status = .ready
                 return
             }
@@ -628,11 +640,21 @@ class PipelineCoordinator {
                 print("[Sprich] Surface: \(bundleIDSnapshot ?? "?") → \(resolved.surface.debugLabel) (host=\(resolved.webHost ?? "—"))")
                 #endif
 
-                finalText = try await llmService.cleanup(
+                let llmOutput = try await llmService.cleanup(
                     inputText: pass1Text,
                     mode: mode,
                     settings: appState.settings,
                     surface: resolved.surface
+                )
+                // Re-apply learned glossary corrections AFTER the LLM. The
+                // rewrite can re-spell or revert a corrected term (e.g. a
+                // learned "Schäfer"), so enforce the user's explicit
+                // corrections on the final text — they must always win.
+                // Idempotent for whole-word terms (`\bfrom\b` won't re-match a
+                // `to` that contains `from`), so this never double-applies.
+                finalText = TextPostProcessor.applyGlossary(
+                    llmOutput,
+                    replacements: appState.settings.glossaryReplacements
                 )
                 // Stash the host so the post-deliver history record can
                 // format `targetApp` as "App — Brand" without re-running

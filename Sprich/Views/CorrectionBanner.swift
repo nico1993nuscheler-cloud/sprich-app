@@ -126,6 +126,136 @@ final class CorrectionBannerController {
     }
 }
 
+// MARK: - Generic hint toast
+
+/// Tiny non-modal toast for transient, non-interactive hints (e.g. a
+/// recording that came through silent so nothing was pasted). Same panel
+/// mechanics as `CorrectionBannerController` — borderless non-activating
+/// `NSPanel` that never steals focus, auto-dismisses, bottom-right of the
+/// frontmost app's screen. Generic icon + message so the pipeline can tell
+/// the user *why* nothing happened instead of silently dismissing.
+@MainActor
+final class HintBannerController {
+
+    static let shared = HintBannerController()
+
+    private var panel: NSPanel?
+    private var autoDismissTimer: Timer?
+
+    private init() {}
+
+    func present(
+        message: String,
+        systemImage: String = "mic.slash",
+        dismissAfter: TimeInterval = 3.0
+    ) {
+        dismiss()
+
+        let view = HintToastView(message: message, systemImage: systemImage)
+        let hosting = NSHostingController(rootView: view)
+        let size = NSSize(width: 320, height: 36)
+
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hosting
+        panel.isFloatingPanel = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        panel.level = .statusBar
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = true
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.contentView?.wantsLayer = true
+
+        positionBottomRight(panel: panel, size: size)
+        panel.orderFrontRegardless()
+        self.panel = panel
+
+        #if DEBUG
+        print("[Sprich] HintBanner: presented '\(message)'")
+        #endif
+
+        autoDismissTimer = Timer.scheduledTimer(withTimeInterval: dismissAfter, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.dismiss() }
+        }
+    }
+
+    func dismiss() {
+        autoDismissTimer?.invalidate()
+        autoDismissTimer = nil
+        guard let panel else { return }
+        panel.orderOut(nil)
+        self.panel = nil
+    }
+
+    private func positionBottomRight(panel: NSPanel, size: NSSize) {
+        let screen = screenForFrontmostApp() ?? NSScreen.main ?? NSScreen.screens.first
+        guard let frame = screen?.visibleFrame else { return }
+        let margin: CGFloat = 24
+        let origin = NSPoint(
+            x: frame.maxX - size.width - margin,
+            y: frame.minY + margin
+        )
+        panel.setFrameOrigin(origin)
+    }
+
+    private func screenForFrontmostApp() -> NSScreen? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            return NSScreen.main
+        }
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for window in info {
+            guard let ownerPid = window[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPid == pid,
+                  let bounds = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = bounds["X"], let y = bounds["Y"],
+                  let w = bounds["Width"], let h = bounds["Height"] else { continue }
+            let center = NSPoint(x: x + w / 2, y: y + h / 2)
+            for screen in NSScreen.screens {
+                let f = screen.frame
+                let flippedY = NSScreen.screens.first.map { $0.frame.maxY - center.y } ?? center.y
+                if f.contains(NSPoint(x: center.x, y: flippedY)) { return screen }
+            }
+        }
+        return NSScreen.main
+    }
+}
+
+private struct HintToastView: View {
+    let message: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.orange)
+                .font(.system(size: 12))
+            Text(message)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(width: 320, height: 36)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(.regularMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.20), lineWidth: 0.5)
+        )
+    }
+}
+
 private struct CorrectionToastView: View {
     let from: String
     let to: String
