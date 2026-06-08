@@ -81,6 +81,13 @@ enum FormalOutputGuard {
         /// fixes that without loosening the ratio for long inputs (where the
         /// "answered the question → 5× list" hallucination still trips).
         var scaffoldAllowanceChars: Int = 0
+        /// Output character count must be at least this fraction of the
+        /// Pass-1 character count (gated to inputs ≥ `minimumLengthCheckChars`).
+        /// Per-surface so compression-heavy destinations (AI chat, task
+        /// manager) can legitimately compress below the default 0.5× without
+        /// tripping. Defaults to `FormalOutputGuard.minimumLengthRatio` (0.5)
+        /// so non-restructuring surfaces are unchanged.
+        var minimumLengthRatio: Double = FormalOutputGuard.minimumLengthRatio
     }
 
     /// Default policy — applies to surfaces that do not restructure
@@ -125,10 +132,15 @@ enum FormalOutputGuard {
     // markers (** **, "- ") and the new title line add fixed chars on top of
     // a moderate 2.0× expansion. A "wrote the work instead of the ticket"
     // failure still produces prose far past this and trips.
+    // Min-length floor lowered to 0.35 — compressing rambly dictation into a
+    // tight imperative title + a couple of bullets legitimately lands below
+    // the default 0.5; run-to-run LLM length variance was straddling 0.5 and
+    // intermittently reverting a correct rewrite to the Pass-1 literal.
     static let taskManagerPolicy = Policy(
         sentenceCountTolerance: 6,
         maximumLengthRatio: 2.0,
-        scaffoldAllowanceChars: 90   // title line + bullet/bold markdown markers
+        scaffoldAllowanceChars: 90,   // title line + bullet/bold markdown markers
+        minimumLengthRatio: 0.35
     )
 
     /// AI-chat policy (ChatGPT / Claude / Gemini / Copilot / Perplexity
@@ -140,10 +152,19 @@ enum FormalOutputGuard {
     /// typically compress input, so the upper bound is rarely the
     /// active check — the hallucination filters (content recall,
     /// language drift) carry the protection.
+    // Min-length floor lowered to 0.3 — an imperative AI-chat prompt
+    // deliberately strips politeness and condenses rambly speech, so a
+    // correct rewrite routinely lands at 0.3-0.5 of Pass-1. The default 0.5
+    // sat inside that legitimate band: with run-to-run cloud-LLM length
+    // variance (nondeterministic even at temperature 0), the SAME dictation
+    // would sometimes pass (~0.55) and sometimes trip (~0.43) and revert to
+    // the literal transcript. 0.3 moves the floor below the whole band; the
+    // content-recall + language-drift filters still catch true substitution.
     static let aiChatPolicy = Policy(
         sentenceCountTolerance: 5,
         maximumLengthRatio: 1.8,
-        scaffoldAllowanceChars: 40   // bulleted constraints
+        scaffoldAllowanceChars: 40,   // bulleted constraints
+        minimumLengthRatio: 0.3
     )
 
     /// Docs policy. Output preserves prose structure with paragraph
@@ -178,10 +199,13 @@ enum FormalOutputGuard {
     /// 0.5 is conservative — legitimate compression of a rambly
     /// dictation typically lands in 0.6–0.8.
     ///
-    /// Shared across surfaces. Surfaces that compress harder than 0.5×
-    /// (task-manager, ai-chat on very rambly inputs) typically come in
-    /// at 0.55–0.7 in practice; if we ever see legitimate sub-0.5×
-    /// compression on those, lift this per-surface too.
+    /// Default for surfaces that don't restructure. Compression-heavy
+    /// surfaces (ai-chat 0.3, task-manager 0.35) override this via
+    /// `Policy.minimumLengthRatio` — an imperative prompt or a tight ticket
+    /// title legitimately compresses below 0.5×, and run-to-run cloud-LLM
+    /// length variance around the floor was intermittently reverting correct
+    /// rewrites to Pass-1. `enforce` reads `policy.minimumLengthRatio`, not
+    /// this constant directly; it remains the field's default value.
     static let minimumLengthRatio: Double = 0.5
 
     /// Below this Pass-1 character count the length-ratio checks are
@@ -298,7 +322,8 @@ enum FormalOutputGuard {
 
         // Min-length floor — gated to longer inputs only; the ratio is noisy
         // on short dictations ("Thanks." → "Thank you." is a legit 1.4×).
-        if pass1Chars >= Self.minimumLengthCheckChars, ratio < Self.minimumLengthRatio {
+        // Per-surface (compression-heavy surfaces lower it); defaults to 0.5.
+        if pass1Chars >= Self.minimumLengthCheckChars, ratio < policy.minimumLengthRatio {
             return Result(
                 text: pass1Text,
                 usedFallback: true,
@@ -415,17 +440,30 @@ enum FormalOutputGuard {
 
     // MARK: - Language detection
 
-    /// Resolve the expected language for an output. Prefer the explicit
-    /// `hint` (ISO 639-1 code from settings / STT auto-detect), and only
-    /// fall back to detecting from `pass1Text` when no hint is provided.
+    /// Resolve the expected language for an output. Formal mode's contract
+    /// is "maintain the INPUT language", so the source of truth is the
+    /// language actually spoken — `pass1Text` — NOT the settings `hint`.
+    ///
+    /// Previously the settings hint won, which mis-fired for users whose
+    /// `preferredLanguage` is one language (e.g. `en`) but who dictate in
+    /// another (e.g. German, common in DACH): the German rewrite was flagged
+    /// as "language drift (expected=en, out=de)" and reverted to the literal
+    /// Pass-1. We now detect from the actual input first and only fall back
+    /// to the hint when the input is too short/ambiguous for `NLLanguage`
+    /// to decide. The drift check still catches the real failure — the model
+    /// translating the input to a DIFFERENT language than it was spoken in —
+    /// because that compares output-language against input-language.
     private static func resolveExpectedLanguage(
         pass1Text: String,
         hint: String?
     ) -> NLLanguage? {
+        if let detected = detectLanguage(pass1Text) {
+            return detected
+        }
         if let hint, let nl = nlLanguage(for: hint) {
             return nl
         }
-        return detectLanguage(pass1Text)
+        return nil
     }
 
     /// Dominant language of `text` via `NLLanguageRecognizer`. nil when

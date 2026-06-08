@@ -52,26 +52,42 @@ enum TextInserter {
             return
         }
 
-        // 1. Save current clipboard contents
+        // 1. Save current clipboard contents for later restoration.
         let savedContents = savePasteboard(pasteboard)
 
-        // Guarantee restoration even if anything below throws or is cancelled.
-        defer {
-            restorePasteboard(pasteboard, from: savedContents)
-        }
-
-        // 2. Set our text on the clipboard
+        // 2. Set our text on the clipboard and remember the resulting
+        //    changeCount so the delayed restore can detect — and refuse to
+        //    clobber — a fresh user copy that lands during the paste window.
         pasteboard.clearContents()
         pasteboard.setString(safeText, forType: .string)
+        let ourChangeCount = pasteboard.changeCount
 
-        // 3. Small delay to ensure pasteboard is ready
+        // 3. Small delay to ensure the pasteboard write is visible to the target.
         try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
 
         // 4. Simulate Cmd+V keystroke
         simulatePaste()
 
-        // 5. Wait for target app to process the paste
-        try? await Task.sleep(nanoseconds: 200_000_000)  // 200ms
+        // 5. Brief settle so the synthetic ⌘V is delivered before we return.
+        try? await Task.sleep(nanoseconds: 150_000_000)  // 150ms
+
+        // 6. Restore the user's clipboard only AFTER the target has had ample
+        //    time to read our text. The previous code restored on a tight
+        //    `defer` ~200ms after ⌘V — under load (Chromium/Electron, busy
+        //    CPU) the target's pasteboard read routinely takes longer, so the
+        //    restore won the race and ⌘V pasted the OLD/empty clipboard: the
+        //    dictation silently vanished. Defer the restore to a detached task
+        //    with a generous delay (~700ms more → ~850ms total post-paste),
+        //    and skip it if the user copied something new in the meantime
+        //    (changeCount moved) so we never clobber a fresh copy. The
+        //    dictation also lives in HistoryStore, so it is never truly lost.
+        let restoreDelay: UInt64 = 700_000_000  // 700ms
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: restoreDelay)
+            let pb = NSPasteboard.general
+            guard pb.changeCount == ourChangeCount else { return }
+            restorePasteboard(pb, from: savedContents)
+        }
     }
 
     // MARK: - Target re-activation

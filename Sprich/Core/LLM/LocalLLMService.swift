@@ -296,7 +296,8 @@ actor LocalLLMService {
             mode: mode,
             editableLayer: settings.editableLayer(for: mode),
             surface: surface,
-            adaptToSurface: settings.adaptToSurface
+            adaptToSurface: settings.adaptToSurface,
+            glossaryReplacements: settings.glossaryReplacements
         )
 
         // Resolve the user-selected tier (Standard 1B / High Quality E2B)
