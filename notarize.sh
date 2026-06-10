@@ -28,12 +28,17 @@
 #      Apple validates the cached credential token, not the password text.
 #
 # Usage:
-#   ./notarize.sh                # builds version 1.0.2 (default)
-#   ./notarize.sh 1.1.0          # builds the version you pass
+#   ./notarize.sh 1.1.0          # builds the version you pass (required)
+#
+# After notarization, publish with: ./scripts/release-dmg.sh <version> <build>
 
 set -e
 
-VERSION="${1:-1.0.2}"
+if [ -z "${1:-}" ]; then
+    echo "ERROR: version argument required, e.g. ./notarize.sh 1.0.16"
+    exit 1
+fi
+VERSION="$1"
 APP_NAME="Sprich"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DIST_DIR="dist"
