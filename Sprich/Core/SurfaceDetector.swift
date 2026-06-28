@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CoreServices  // AEDeterminePermissionToAutomateTarget, typeWildCard
 
 /// Detects the destination Surface (email / slack / chat / docs / …) the
 /// user is dictating into, from the frontmost application at hotkey time.
@@ -45,7 +46,18 @@ enum SurfaceDetector {
             return Resolved(surface: native, webHost: nil)
         }
 
+        // Browsers need an AppleScript tab read. CRITICAL: only attempt it when
+        // Automation permission for this browser is ALREADY granted. Triggering
+        // the TCC Automation prompt mid-dictation gates CGEvent dispatch
+        // system-wide — i.e. it silently blocks the ⌘V paste that delivers the
+        // transcription (the first-customer bug). `automationAlreadyGranted`
+        // queries the permission WITHOUT prompting (askUserIfNeeded: false), so
+        // for undetermined/denied users we simply degrade to `.generic` — the
+        // exact same safe fallback as a failed read — and the paste is never
+        // put at risk. Users who have granted Automation still get the
+        // destination-aware enrichment.
         if SurfaceMapping.isAppleScriptBrowser(bundleID),
+           automationAlreadyGranted(forBundleID: bundleID),
            let urlString = await readActiveTabURL(browserBundleID: bundleID) {
             let host = URL(string: urlString)?.host?.lowercased()
             let surface = SurfaceMapping.fromURL(urlString) ?? .generic
@@ -53,6 +65,23 @@ enum SurfaceDetector {
         }
 
         return .generic
+    }
+
+    /// Whether Sprich is *already* allowed to send Apple Events to `bundleID`,
+    /// determined WITHOUT showing the TCC Automation prompt
+    /// (`askUserIfNeeded: false`). Returns `true` only for an explicit grant;
+    /// undetermined ("would prompt"), denied, or target-not-running all return
+    /// `false`. This is what keeps surface detection from ever triggering the
+    /// permission dialog that would gate the paste.
+    private static func automationAlreadyGranted(forBundleID bundleID: String) -> Bool {
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
+        guard let aeDesc = target.aeDesc else { return false }
+        // typeWildCard / typeWildCard = "any event" — we only care whether
+        // automation is permitted at all, not about a specific event.
+        let status = AEDeterminePermissionToAutomateTarget(
+            aeDesc, typeWildCard, typeWildCard, false
+        )
+        return status == noErr
     }
 
     /// Back-compat wrapper for callers that only need the `Surface`
