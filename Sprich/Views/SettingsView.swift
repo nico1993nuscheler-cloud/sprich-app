@@ -932,7 +932,19 @@ private struct GeneralSection: View {
                     permissionRow(
                         name: "Microphone",
                         granted: Permissions.isMicrophoneGranted(),
-                        pendingNote: "Requested on first use"
+                        // When denied, macOS won't re-prompt — the only way
+                        // back is the System Settings pane. When undetermined,
+                        // requesting triggers the prompt (the app isn't listed
+                        // in Settings until it has asked once, so opening
+                        // Settings there would be a dead end).
+                        action: {
+                            if Permissions.microphoneNeedsSettingsRecovery() {
+                                Permissions.openMicrophoneSettings()
+                            } else {
+                                Task { _ = await Permissions.requestMicrophone() }
+                            }
+                        },
+                        actionLabel: Permissions.microphoneNeedsSettingsRecovery() ? "Open Settings" : "Grant Access"
                     )
                 }
 
@@ -958,6 +970,7 @@ private struct GeneralSection: View {
 
     private func permissionRow(name: String, granted: Bool,
                                 action: (() -> Void)? = nil,
+                                actionLabel: String = "Open Settings",
                                 pendingNote: String? = nil) -> some View {
         HStack {
             Text(name)
@@ -970,7 +983,7 @@ private struct GeneralSection: View {
                 // tone: orange = action needed, red = blocking error).
                 Image(systemName: "xmark.circle.fill").foregroundColor(.orange)
                 if let action = action {
-                    Button("Open Settings", action: action)
+                    Button(actionLabel, action: action)
                         .controlSize(.small)
                 } else if let note = pendingNote {
                     Text(note).font(.caption).foregroundColor(.secondary)
