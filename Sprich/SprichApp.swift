@@ -770,6 +770,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         openAXItem.target = self
         diagMenu.addItem(openAXItem)
 
+        let openMicItem = NSMenuItem(title: "Open Microphone settings", action: #selector(openMicSettings), keyEquivalent: "")
+        openMicItem.target = self
+        diagMenu.addItem(openMicItem)
+
         diagItem.submenu = diagMenu
         menu.addItem(diagItem)
 
@@ -1088,6 +1092,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openAXSettings() {
         Permissions.openAccessibilitySettings()
+    }
+
+    @objc private func openMicSettings() {
+        Permissions.openMicrophoneSettings()
     }
 
     @objc private func restartHotkeys() {

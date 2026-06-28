@@ -42,4 +42,26 @@ enum Permissions {
     static func isMicrophoneGranted() -> Bool {
         return microphoneStatus() == .authorized
     }
+
+    /// True when the mic has been explicitly denied or restricted. macOS
+    /// will NOT re-prompt in this state — `requestMicrophone()` returns
+    /// false immediately — so the only recovery is sending the user to
+    /// System Settings via `openMicrophoneSettings()`.
+    static func microphoneNeedsSettingsRecovery() -> Bool {
+        switch microphoneStatus() {
+        case .denied, .restricted: return true
+        default: return false
+        }
+    }
+
+    /// Open System Settings to the Microphone privacy pane. Unlike
+    /// Accessibility (which has `openAccessibilitySettings()` + a Diagnostics
+    /// entry), a denied mic had no in-app recovery affordance — once the
+    /// user clicked "Don't Allow", macOS never re-prompts and there was no
+    /// way back. This is that way back.
+    static func openMicrophoneSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }

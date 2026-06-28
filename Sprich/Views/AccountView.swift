@@ -28,6 +28,12 @@ struct AccountView: View {
     /// reused here — avoids duplicating the confirmation copy.
     let onSignOut: () -> Void
 
+    /// "Restore purchase" recovery state. Re-runs validate-trial, which
+    /// also auto-attaches any pending LemonSqueezy order parked under this
+    /// account's email. Self-serve fix for "I paid but it didn't unlock".
+    @State private var isRestoring = false
+    @State private var restoreResult: String?
+
     var body: some View {
         Group {
             if trial.entitlement == .deviceBlocked {
@@ -57,6 +63,8 @@ struct AccountView: View {
                 trialStateRow
             }
             .frame(maxWidth: .infinity)
+
+            restoreRow
 
             if trial.entitlement == .trialActive {
                 Button {
@@ -180,6 +188,61 @@ struct AccountView: View {
                 .foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: - Restore purchase / refresh license
+
+    /// Shown unless already licensed. A buyer whose purchase didn't attach
+    /// (paid with a different email, signed up after paying) clicks this to
+    /// force a fresh validate-trial — which auto-attaches any pending order
+    /// matching their account email. If still nothing attaches, points them
+    /// at support so they're never stuck.
+    @ViewBuilder
+    private var restoreRow: some View {
+        if trial.entitlement != .licensed {
+            VStack(spacing: 6) {
+                Button {
+                    Task { await restoreLicense() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if isRestoring {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(isRestoring ? "Checking…" : "Restore purchase")
+                    }
+                    .frame(minWidth: 160)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .disabled(isRestoring)
+
+                if let restoreResult {
+                    Text(restoreResult)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func restoreLicense() async {
+        isRestoring = true
+        restoreResult = nil
+        await trial.validateNow()
+        isRestoring = false
+        if trial.entitlement == .licensed {
+            restoreResult = "Purchase restored — lifetime access is active."
+        } else if let err = trial.lastError {
+            restoreResult = "Couldn't reach the server (\(err)). Check your connection and try again."
+        } else {
+            let email = auth.currentUserEmail ?? "this account"
+            restoreResult = "No purchase found for \(email). If you paid with a different email, email support@sprichapp.com."
+        }
     }
 
     // MARK: - Email row

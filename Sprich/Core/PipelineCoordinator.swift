@@ -183,12 +183,19 @@ class PipelineCoordinator {
         }
 
         if !Permissions.isMicrophoneGranted() {
+            // If the mic was already explicitly denied/restricted, macOS
+            // won't re-prompt — requestMicrophone() would no-op. Skip
+            // straight to the Settings-recovery path. Otherwise this is
+            // the first ask (notDetermined), so prompt.
+            if Permissions.microphoneNeedsSettingsRecovery() {
+                surfaceMicDeniedRecovery()
+                return
+            }
             let granted = await Permissions.requestMicrophone()
             if !granted {
-                surfaceBlockingError(
-                    title: "Microphone access denied",
-                    body: "Grant Sprich microphone permission in System Settings → Privacy & Security → Microphone."
-                )
+                // The user just declined the prompt — now denied, no
+                // re-prompt possible. Route them to Settings.
+                surfaceMicDeniedRecovery()
                 return
             }
         }
@@ -846,6 +853,25 @@ class PipelineCoordinator {
     /// `appState.status` observer in AppDelegate, and we print to the
     /// Xcode console in DEBUG so dev debugging stays visible even if the
     /// paste target swallows text silently.
+    /// Mic-denied recovery: surface the inline blocking message, then open
+    /// the Microphone privacy pane so the user has a one-click path back.
+    ///
+    /// Unlike Accessibility, a denied mic never re-prompts and previously
+    /// had no in-app recovery — the user was simply stuck. We open Settings
+    /// for them (the action a "Open Microphone Settings" button would
+    /// trigger; the paste-only error surface can't host a real button).
+    /// The open is delayed ~1.2 s so the inline message lands in the user's
+    /// focused field BEFORE System Settings steals focus.
+    private func surfaceMicDeniedRecovery() {
+        surfaceBlockingError(
+            title: "Microphone access denied",
+            body: "Sprich can't hear you. Enable Sprich under Microphone in System Settings — opening it now."
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            Permissions.openMicrophoneSettings()
+        }
+    }
+
     private func surfaceBlockingError(title: String, body: String) {
         appState.status = .error(title)
 

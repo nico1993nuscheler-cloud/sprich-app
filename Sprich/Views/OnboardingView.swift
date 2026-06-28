@@ -36,6 +36,10 @@ struct OnboardingView: View {
     @State private var groqKey = ""
     @State private var accessibilityGranted = Permissions.isAccessibilityGranted()
     @State private var microphoneGranted = Permissions.isMicrophoneGranted()
+    /// True when the mic was explicitly denied/restricted — macOS won't
+    /// re-prompt, so the CTA must send the user to System Settings rather
+    /// than call `requestMicrophone()` (which would no-op).
+    @State private var microphoneDenied = Permissions.microphoneNeedsSettingsRecovery()
     /// STT provider chosen on card 3. `.local` defaults so the
     /// privacy-first card lights up before the user does anything.
     @State private var providerChoice: STTProviderType = .local
@@ -101,6 +105,7 @@ struct OnboardingView: View {
         .onReceive(permissionTimer) { _ in
             accessibilityGranted = Permissions.isAccessibilityGranted()
             microphoneGranted = Permissions.isMicrophoneGranted()
+            microphoneDenied = Permissions.microphoneNeedsSettingsRecovery()
         }
         .onChange(of: auth.isSignedIn) { signedIn in
             // SwiftUI .onChange of a computed property derived from a
@@ -309,13 +314,22 @@ struct OnboardingView: View {
 
             permissionRow(
                 title: "Microphone",
-                explanation: "Records audio while you hold the shortcut. Released audio is processed and discarded.",
+                explanation: microphoneDenied
+                    ? "Microphone access was denied. macOS won't ask again — enable Sprich under Microphone in System Settings, then return here."
+                    : "Records audio while you hold the shortcut. Released audio is processed and discarded.",
                 granted: microphoneGranted,
-                cta: "Grant Microphone Access",
+                // Once denied, requestMicrophone() no-ops — the only way back
+                // is System Settings, so the CTA changes to open it directly.
+                cta: microphoneDenied ? "Open Microphone Settings" : "Grant Microphone Access",
                 action: {
-                    Task {
-                        _ = await Permissions.requestMicrophone()
-                        microphoneGranted = Permissions.isMicrophoneGranted()
+                    if microphoneDenied {
+                        Permissions.openMicrophoneSettings()
+                    } else {
+                        Task {
+                            _ = await Permissions.requestMicrophone()
+                            microphoneGranted = Permissions.isMicrophoneGranted()
+                            microphoneDenied = Permissions.microphoneNeedsSettingsRecovery()
+                        }
                     }
                 }
             )
