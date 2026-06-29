@@ -34,7 +34,18 @@ enum Permissions {
     }
 
     /// Request microphone permission. Returns true if granted.
+    ///
+    /// Sprich runs as a menubar agent (`LSUIElement`). When the very first
+    /// microphone request fires from a global-hotkey dictation while another
+    /// app is frontmost, the macOS TCC consent prompt can fail to surface —
+    /// the user sees nothing, never answers, and because no TCC entry is
+    /// created until the user answers a prompt, Sprich never even appears in
+    /// System Settings → Privacy & Security → Microphone. (This is what the
+    /// first paying customer hit.) Activating Sprich first makes the request
+    /// come from the frontmost app, so the prompt is reliably presented and
+    /// the TCC entry is created.
     static func requestMicrophone() async -> Bool {
+        await MainActor.run { NSApp.activate(ignoringOtherApps: true) }
         return await AVCaptureDevice.requestAccess(for: .audio)
     }
 

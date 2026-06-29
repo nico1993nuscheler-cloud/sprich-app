@@ -67,16 +67,57 @@ xcodebuild -project "${APP_NAME}.xcodeproj" -scheme "${APP_NAME}" -configuration
 # Codesign the .app bundle with hardened runtime + secure timestamp.
 # Both are notarization requirements — Apple rejects non-hardened builds
 # and any signature without an Apple-anchored timestamp.
+#
+# Sign INSIDE-OUT and apply the entitlements to the top-level bundle.
+# This was the bug behind the "Sprich doesn't appear in the Microphone
+# list" reports: a single `codesign --deep --force` WITHOUT --entitlements
+# re-seals the main executable with an EMPTY entitlement set, stripping the
+# `com.apple.security.device.audio-input` (and apple-events) entitlements
+# that Xcode embedded from Sprich/Sprich.entitlements. Under the hardened
+# runtime those resource-access entitlements are REQUIRED — without
+# audio-input macOS blocks the mic before TCC ever registers the app, so it
+# never shows up under System Settings → Privacy → Microphone and the
+# in-app "Grant" no-ops. Verify the shipped fix with:
+#   codesign -d --entitlements - --xml build/Sprich.app | plutil -p -
+# and confirm `com.apple.security.device.audio-input` is present.
+ENTITLEMENTS="Sprich/Sprich.entitlements"
 echo "[2/7] Codesigning ${APP_NAME}.app..."
+
+# 1) Sign nested code (frameworks + Sparkle XPC helpers) with hardened
+#    runtime. --deep handles the nested binaries; they carry their own
+#    entitlements and must NOT get the app's entitlements.
 codesign --deep --force \
     --options runtime \
     --timestamp \
     --sign "${SIGN_IDENTITY}" \
     "build/${APP_NAME}.app"
 
+# 2) Re-sign ONLY the top-level bundle (no --deep, so the nested
+#    signatures from step 1 are preserved) WITH the app entitlements. This
+#    is what gives the main executable com.apple.security.device.audio-input
+#    under the hardened runtime.
+codesign --force \
+    --options runtime \
+    --timestamp \
+    --entitlements "${ENTITLEMENTS}" \
+    --sign "${SIGN_IDENTITY}" \
+    "build/${APP_NAME}.app"
+
 # Verify the signature is valid before packaging — catches mis-signed
 # embedded frameworks early instead of mid-notarization.
 codesign --verify --deep --strict --verbose=2 "build/${APP_NAME}.app"
+
+# Hard gate: refuse to publish a build whose main executable is missing the
+# microphone entitlement. This is the exact regression that shipped a
+# mic-less app to the first paying customer; never let it out again.
+if ! codesign -d --entitlements - --xml "build/${APP_NAME}.app" 2>/dev/null \
+        | plutil -p - 2>/dev/null \
+        | grep -q "com.apple.security.device.audio-input"; then
+    echo "ERROR: signed ${APP_NAME}.app is MISSING com.apple.security.device.audio-input."
+    echo "       The microphone will not work and the app won't appear in the"
+    echo "       Privacy → Microphone list. Aborting before notarization."
+    exit 1
+fi
 
 # Stage the DMG contents in a temp dir (.app + symlink to /Applications).
 echo "[3/7] Staging DMG contents..."

@@ -4,6 +4,10 @@
 <dict>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Match Release: needed under the hardened runtime to send Apple
+         Events (SurfaceDetector browser-tab URL reads). -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
     <key>com.apple.security.app-sandbox</key>
     <false/>
     <!-- get-task-allow=true ONLY for local Debug builds, so the Xcode
