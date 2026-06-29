@@ -193,9 +193,19 @@ class PipelineCoordinator {
             }
             let granted = await Permissions.requestMicrophone()
             if !granted {
-                // The user just declined the prompt — now denied, no
-                // re-prompt possible. Route them to Settings.
-                surfaceMicDeniedRecovery()
+                if Permissions.microphoneNeedsSettingsRecovery() {
+                    // The user actively denied the prompt — now denied, no
+                    // re-prompt possible. Route them to Settings.
+                    surfaceMicDeniedRecovery()
+                } else {
+                    // Prompt was dismissed without choosing (still
+                    // notDetermined). Settings would be a dead end — no TCC
+                    // entry yet — so just ask them to retry and grant.
+                    surfaceBlockingError(
+                        title: "Microphone access needed",
+                        body: "Press your dictation shortcut again and choose \u{201C}Allow\u{201D} when macOS asks for microphone access."
+                    )
+                }
                 return
             }
         }

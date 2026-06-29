@@ -4,6 +4,12 @@
 <dict>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- Required under the hardened runtime to SEND Apple Events. Without
+         it, SurfaceDetector's `tell application "Google Chrome" to get URL`
+         is blocked at the runtime level before TCC can even prompt — which
+         silently broke Formal-mode browser surface detection. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
     <key>com.apple.security.app-sandbox</key>
     <false/>
     <key>com.apple.security.get-task-allow</key>
