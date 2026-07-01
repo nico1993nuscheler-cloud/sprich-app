@@ -205,8 +205,13 @@ enum TextInserter {
             )
         }
 
-        // 2. System notification (best-effort) with the actionable detail.
-        await notifyCopiedToClipboard(reason: reason, appName: appName)
+        // 2. System notification (best-effort), fired WITHOUT awaiting. The
+        //    toast above is the primary, always-visible surface; the
+        //    notification is a bonus. `requestAuthorization` can block for
+        //    many seconds on the first-run system permission prompt, and we
+        //    must not stall the pipeline (status stuck in .processing, overlay
+        //    spinning, no new dictation possible) waiting on it. Fire-and-forget.
+        Task { await notifyCopiedToClipboard(reason: reason, appName: appName) }
     }
 
     /// One-line toast copy — must fit `HintToastView` (single line, ~320pt).
