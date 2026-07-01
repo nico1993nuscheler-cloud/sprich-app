@@ -565,12 +565,16 @@ class PipelineCoordinator {
 
             // 3. Kick off surface resolution in parallel with STT — but
             // ONLY for Formal mode with the setting on. Literal and
-            // Custom never consume the result, and launching AppleScript
-            // against a browser frontmost app can (a) trigger a TCC
-            // Automation prompt that gates CGEvent dispatch system-wide
-            // and (b) burn main-thread cycles via Apple Events bouncing.
-            // Keeping Literal's release-to-paste path zero-cost is the
-            // whole point of Literal mode.
+            // Custom never consume the result, and the browser AppleScript
+            // would otherwise burn main-thread cycles via Apple Events
+            // bouncing. Keeping Literal's release-to-paste path zero-cost is
+            // the whole point of Literal mode.
+            //
+            // SurfaceDetector.resolve now self-gates the AppleScript on
+            // Automation permission being ALREADY granted (it never shows the
+            // TCC prompt), so this can no longer trigger the permission dialog
+            // that used to gate CGEvent ⌘V dispatch system-wide and silently
+            // break the paste. Undetermined/denied users just get `.generic`.
             let bundleIDSnapshot = capturedBundleID
             let shouldResolveSurface = (mode == .formal) && appState.settings.adaptToSurface
             let surfaceTask: Task<SurfaceDetector.Resolved, Never>? = shouldResolveSurface

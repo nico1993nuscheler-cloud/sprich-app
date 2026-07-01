@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import CoreGraphics
 import UserNotifications
+import Carbon  // IsSecureEventInputEnabled
 
 /// Inserts text into the currently focused text field by simulating Cmd+V paste.
 /// Saves and restores the original clipboard contents.
@@ -34,23 +35,56 @@ enum TextInserter {
         // overrides (Trojan Source, CVE-2021-42574). Whitespace is preserved.
         let safeText = InputSanitizer.sanitizeForPaste(text)
 
-        // Ensure the captured target is frontmost before we synthesize Cmd+V.
+        // --- Preconditions for a reliable synthetic paste -----------------
+        // CGEvent-based ⌘V has NO success callback — `post()` returns Void and
+        // a blocked event is a silent no-op. So instead of pasting blind and
+        // hoping, we verify the few conditions that are known to gate the
+        // paste up front. If any fails we never synthesise the keystroke;
+        // we leave the text on the clipboard and surface a visible, actionable
+        // fallback so the dictation can never just disappear (the bug that
+        // cost us our first customer: text shown in the HUD, never inserted,
+        // zero feedback). See `deliverToClipboardWithFallback`.
+
+        // 1. Accessibility. Without it, AXIsProcessTrusted() is false and the
+        //    system silently drops our synthetic key events — exactly the
+        //    guard HotkeyManager already enforces before listening. Mirror it
+        //    here so the paste path can't silently no-op.
+        guard Permissions.isAccessibilityGranted() else {
+            #if DEBUG
+            print("[Sprich] paste: Accessibility not granted — clipboard + visible fallback")
+            #endif
+            await deliverToClipboardWithFallback(safeText, reason: .accessibilityDenied, appName: targetAppName)
+            return
+        }
+
+        // 2. Target re-activation. If the captured target is gone or won't come
+        //    back to the front, do NOT paste blind into whatever is focused.
         let targetReady = await ensureTargetFrontmost(
             targetPid: targetPid,
             targetBundleID: targetBundleID
         )
-
         guard targetReady else {
-            // Target app is gone or wouldn't re-activate. Do NOT paste blind.
-            // Leave the transcription on the clipboard (no restore) + notify.
             #if DEBUG
-            print("[Sprich] paste: target not frontmost — clipboard + notification fallback")
+            print("[Sprich] paste: target not frontmost — clipboard + visible fallback")
             #endif
-            pasteboard.clearContents()
-            pasteboard.setString(safeText, forType: .string)
-            await notifyCopiedToClipboard(appName: targetAppName)
+            await deliverToClipboardWithFallback(safeText, reason: .targetUnavailable, appName: targetAppName)
             return
         }
+
+        // 3. Secure input. When any app has enabled EnableSecureEventInput
+        //    (password fields, some terminals, 1Password, a screen-share, or
+        //    an app that left it stuck on), the OS blocks ALL synthetic
+        //    keystrokes — our ⌘V would vanish with no error. Detect it and
+        //    fall back visibly instead.
+        guard !IsSecureEventInputEnabled() else {
+            #if DEBUG
+            print("[Sprich] paste: secure event input active — clipboard + visible fallback")
+            #endif
+            await deliverToClipboardWithFallback(safeText, reason: .secureInput, appName: targetAppName)
+            return
+        }
+
+        // All preconditions satisfied — proceed with the real paste.
 
         // 1. Save current clipboard contents for later restoration.
         let savedContents = savePasteboard(pasteboard)
@@ -129,20 +163,91 @@ enum TextInserter {
         return false
     }
 
+    // MARK: - Visible fallback (never lose the dictation)
+
+    /// Why we couldn't synthesise the paste. Each case maps to its own
+    /// banner/notification copy so the user is told *what to do* next.
+    enum PasteFallbackReason {
+        /// Accessibility permission is off — synthetic key events are dropped.
+        case accessibilityDenied
+        /// The captured target app is gone / wouldn't re-activate.
+        case targetUnavailable
+        /// Secure event input is active — the OS blocks synthetic keystrokes.
+        case secureInput
+    }
+
+    /// The dictation could not be pasted automatically. Put it on the
+    /// clipboard (without the restore step — it must stay there, recoverable)
+    /// and surface it **two** ways so it can never silently vanish:
+    ///   1. An in-app toast (`HintBannerController`) — always visible, needs no
+    ///      permission, shown even if notifications are muted/denied.
+    ///   2. A system notification — survives if the user's eyes were elsewhere.
+    /// The text also lives in `HistoryStore`, so it is recoverable regardless.
+    private static func deliverToClipboardWithFallback(
+        _ safeText: String,
+        reason: PasteFallbackReason,
+        appName: String?
+    ) async {
+        // Leave the transcription on the clipboard — no save/restore, so the
+        // delayed restore can never clobber it.
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(safeText, forType: .string)
+
+        // 1. Always-visible in-app toast. This is the surface that fixes the
+        //    "zero feedback" failure — it does not depend on notification
+        //    authorization or on the user looking at Notification Center.
+        await MainActor.run {
+            HintBannerController.shared.present(
+                message: bannerMessage(for: reason),
+                systemImage: "doc.on.clipboard",
+                dismissAfter: 6.0
+            )
+        }
+
+        // 2. System notification (best-effort), fired WITHOUT awaiting. The
+        //    toast above is the primary, always-visible surface; the
+        //    notification is a bonus. `requestAuthorization` can block for
+        //    many seconds on the first-run system permission prompt, and we
+        //    must not stall the pipeline (status stuck in .processing, overlay
+        //    spinning, no new dictation possible) waiting on it. Fire-and-forget.
+        Task { await notifyCopiedToClipboard(reason: reason, appName: appName) }
+    }
+
+    /// One-line toast copy — must fit `HintToastView` (single line, ~320pt).
+    private static func bannerMessage(for reason: PasteFallbackReason) -> String {
+        switch reason {
+        case .accessibilityDenied:
+            return "Accessibility off — text copied, press ⌘V"
+        case .targetUnavailable:
+            return "Text copied to clipboard — press ⌘V"
+        case .secureInput:
+            return "Can’t paste here — text copied, press ⌘V"
+        }
+    }
+
     /// Post a user notification telling them the transcription is on the
     /// clipboard. Reuses the same `UNUserNotificationCenter` the app already
     /// uses for the missing-key banner. Best-effort: if notifications aren't
-    /// authorized the text is still on the clipboard and recoverable via ⌘V.
-    private static func notifyCopiedToClipboard(appName: String?) async {
+    /// authorized the in-app toast above still showed and the text is still on
+    /// the clipboard, recoverable via ⌘V.
+    private static func notifyCopiedToClipboard(reason: PasteFallbackReason, appName: String?) async {
         let center = UNUserNotificationCenter.current()
         _ = try? await center.requestAuthorization(options: [.alert, .sound])
 
         let content = UNMutableNotificationContent()
         content.title = "Transcription copied to clipboard"
-        if let appName, !appName.isEmpty {
-            content.body = "Couldn't switch back to \(appName). Press ⌘V where you want it."
-        } else {
-            content.body = "Press ⌘V where you want to paste it."
+        switch reason {
+        case .accessibilityDenied:
+            content.body = "Sprich needs Accessibility to paste for you. Enable it in System Settings → Privacy & Security → Accessibility. Your text is on the clipboard — press ⌘V."
+        case .secureInput:
+            content.body = "This field blocks automatic paste (secure input). Your text is on the clipboard — press ⌘V where you want it."
+        case .targetUnavailable:
+            if let appName, !appName.isEmpty {
+                content.body = "Couldn't switch back to \(appName). Press ⌘V where you want it."
+            } else {
+                content.body = "Press ⌘V where you want to paste it."
+            }
         }
         content.sound = .default
 
